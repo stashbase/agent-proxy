@@ -64,29 +64,38 @@ export function runSandboxedTool<Input, Output = unknown>(
 
   return new Promise<Output>((resolve, reject) => {
     let settled = false
+
     const finish = (callback: () => void) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
       callback()
     }
+
     const timeout = setTimeout(() => {
       child.kill('SIGTERM')
       finish(() => reject(new Error(`Sandboxed tool timed out after ${timeoutMs}ms`)))
     }, timeoutMs)
+
     child.once('error', (cause) => finish(() => reject(cause)))
     child.once('exit', (code, signal) => {
-      if (!settled)
+      if (!settled) {
         finish(() =>
           reject(
             new Error(`Sandboxed tool exited before returning a result (${signal ?? code ?? 1})`)
           )
         )
+      }
     })
+
     child.on('message', (reply: WorkerReply) => {
-      if (reply.ok) finish(() => resolve(reply.value as Output))
-      else finish(() => reject(new Error(`Sandboxed tool failed: ${reply.message}`)))
+      if (reply.ok) {
+        finish(() => resolve(reply.value as Output))
+      } else {
+        finish(() => reject(new Error(`Sandboxed tool failed: ${reply.message}`)))
+      }
     })
+
     child.send({ module, exportName: options.exportName ?? 'default', input })
   })
 }
@@ -94,8 +103,11 @@ export function runSandboxedTool<Input, Output = unknown>(
 function normalizeModule(module: URL | string): string {
   if (module instanceof URL) return module.href
   if (module.startsWith('file:')) return module
-  if (!module.startsWith('/'))
+
+  if (!module.startsWith('/')) {
     throw new Error('Sandboxed tool module must be an absolute path or file URL')
+  }
+
   return new URL(`file://${module}`).href
 }
 
@@ -106,6 +118,7 @@ function childEnvironment(proxy: LocalAgentProxy, extra: Record<string, string> 
       return value === undefined ? [] : [[name, value]]
     })
   )
+
   // Do not inherit the parent's arbitrary environment: it may contain unrelated
   // provider credentials. The proxy adds only its placeholders and transport vars.
   // Proxy transport settings and placeholders must win over user-provided
@@ -120,9 +133,12 @@ export function sandboxCommand(
   platform = process.platform
 ): { command: string; args: string[] } {
   if (!sandbox) return { command: process.execPath, args: [] }
+
   const proxyUrl = new URL(proxy.url)
-  if (proxyUrl.hostname !== '127.0.0.1' || !proxyUrl.port)
+  if (proxyUrl.hostname !== '127.0.0.1' || !proxyUrl.port) {
     throw new Error('Sandboxed tool requires a localhost Agent Proxy URL')
+  }
+
   if (platform === 'darwin') {
     const profile = `
       (version 1)
@@ -133,6 +149,7 @@ export function sandboxCommand(
     `
     return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, process.execPath] }
   }
+
   if (platform === 'linux') {
     return {
       command: 'systemd-run',
@@ -148,5 +165,6 @@ export function sandboxCommand(
       ],
     }
   }
+
   throw new Error('Sandboxed tools are currently supported on macOS and systemd-based Linux')
 }

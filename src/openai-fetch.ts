@@ -15,11 +15,16 @@ import type {
 export function createOpenAIProxyFetch(proxy: LocalAgentProxy): typeof fetch {
   const ca = readFileSync(proxy.caPath)
   const proxyUrl = new URL(proxy.url)
+
   return async (input, init) => {
     const request = new Request(input, init)
     const url = new URL(request.url)
-    if (url.protocol !== 'https:') throw new TypeError('Agent Proxy fetch only supports HTTPS URLs')
+    if (url.protocol !== 'https:') {
+      throw new TypeError('Agent Proxy fetch only supports HTTPS URLs')
+    }
+
     const socket = await openTunnel(proxyUrl, url.hostname, Number(url.port || 443), ca)
+
     return new Promise<Response>((resolve, reject) => {
       const agent = new Agent({ keepAlive: false })
       agent.createConnection = () => socket
@@ -43,9 +48,12 @@ export function createOpenAIProxyFetch(proxy: LocalAgentProxy): typeof fetch {
         }
       )
       upstream.once('error', reject)
-      if (request.body)
+
+      if (request.body) {
         Readable.fromWeb(request.body as unknown as NodeReadableStream).pipe(upstream)
-      else upstream.end()
+      } else {
+        upstream.end()
+      }
     })
   }
 }
@@ -62,7 +70,10 @@ export function createOpenAIProxyClient(
   }
   const binding = options.apiKeyBinding ?? 'OPENAI_API_KEY'
   const apiKey = options.proxy.placeholders[binding]
-  if (!apiKey) throw new Error(`Agent Proxy does not expose the ${binding} placeholder`)
+  if (!apiKey) {
+    throw new Error(`Agent Proxy does not expose the ${binding} placeholder`)
+  }
+
   return new openai({ apiKey, fetch: createOpenAIProxyFetch(options.proxy) })
 }
 
@@ -74,16 +85,22 @@ function openTunnel(
 ): Promise<ReturnType<typeof tlsConnect>> {
   return new Promise((resolve, reject) => {
     const socket = connect(Number(proxyUrl.port), proxyUrl.hostname)
+
     socket.once('error', reject)
     socket.once('connect', () =>
       socket.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n\r\n`)
     )
     let response = ''
+
     socket.on('data', (chunk) => {
       response += chunk.toString('latin1')
+
       if (!response.includes('\r\n\r\n')) return
-      if (!response.startsWith('HTTP/1.1 200'))
+
+      if (!response.startsWith('HTTP/1.1 200')) {
         return reject(new Error('Agent Proxy denied CONNECT'))
+      }
+
       socket.removeAllListeners('data')
       const tlsSocket = tlsConnect({ socket, servername: host, ca })
       tlsSocket.once('secureConnect', () => resolve(tlsSocket))

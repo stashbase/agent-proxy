@@ -28,6 +28,7 @@ function error(code: AgentProxyErrorCode): AgentProxyError {
     'proxy.request_invalid': 'Agent Proxy received an invalid request',
     'proxy.session_expired': 'Agent Proxy session has expired',
   }
+
   return { error: { code, message: message[code] } }
 }
 
@@ -36,6 +37,7 @@ function writeError(
   code: AgentProxyErrorCode
 ): void {
   const body = JSON.stringify(error(code))
+
   if ('writeHead' in response) {
     response.writeHead(403, {
       'content-type': 'application/json',
@@ -44,6 +46,7 @@ function writeError(
     response.end(body)
     return
   }
+
   response.end(
     `HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`
   )
@@ -64,6 +67,7 @@ function parseAuthority(value: string): { host: string; port: number } | undefin
   // CONNECT uses authority-form only. Reject paths, credentials, and fragments
   // rather than letting URL parsing silently normalize them into a destination.
   if (!value || /[/?#@]/.test(value)) return undefined
+
   try {
     const url = new URL(`http://${value}`)
     const port = Number(url.port || 443)
@@ -123,17 +127,23 @@ async function startLocalAgentProxyInternal<
       ]
     })
   ) as ResolvedOptions['bindings']
+
   const normalizedOptions: ResolvedOptions = { ...options, bindings }
   validateOptions(normalizedOptions)
+
   for (const name of Object.keys(normalizedOptions.bindings)) {
-    if (!normalizedOptions.bindings[name].secret)
+    if (!normalizedOptions.bindings[name].secret) {
       throw new Error(`Agent Proxy binding ${name} does not have a secret value`)
+    }
   }
+
   const resolvedOptions: ResolvedOptions = normalizedOptions
   const authority = await createCertificateAuthority()
+
   const placeholders = Object.fromEntries(
     Object.keys(resolvedOptions.bindings).map((name) => [name, `\${STASHBASE_${name}}`])
   ) as LocalAgentProxy<Extract<keyof Bindings, string>>['placeholders']
+
   const childEnv: Record<string, string> = {
     HTTP_PROXY: '',
     HTTPS_PROXY: '',
@@ -146,10 +156,14 @@ async function startLocalAgentProxyInternal<
     npm_config_proxy: '',
     npm_config_https_proxy: '',
   }
-  for (const [name, binding] of Object.entries(resolvedOptions.bindings))
+
+  for (const [name, binding] of Object.entries(resolvedOptions.bindings)) {
     if (binding.env) childEnv[binding.env] = placeholders[name]
+  }
+
   const sockets = new Set<Socket>()
   let stopped = false
+
   const server = createHttpServer((request, response) =>
     handlePlainRequest(request, response, resolvedOptions)
   )
@@ -157,14 +171,17 @@ async function startLocalAgentProxyInternal<
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
   })
+
   server.on('connect', (request: IncomingMessage, socket: Socket, head: Buffer) => {
     const target = parseAuthority(request.url ?? '')
     if (
       !target ||
       isDenied(target.host, resolvedOptions) ||
       !canInspect(target.host, resolvedOptions)
-    )
+    ) {
       return writeError(socket, 'proxy.host_denied')
+    }
+
     const leaf = authority.createLeaf(target.host)
     socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
     if (head.length) socket.unshift(head)
@@ -177,6 +194,7 @@ async function startLocalAgentProxyInternal<
     )
     tlsSocket.on('error', () => tlsSocket.destroy())
   })
+
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
@@ -184,12 +202,16 @@ async function startLocalAgentProxyInternal<
       resolve()
     })
   })
+
   const address = server.address()
-  if (!address || typeof address === 'string')
+  if (!address || typeof address === 'string') {
     throw new Error('Agent Proxy did not receive a TCP address')
+  }
+
   const url = `http://127.0.0.1:${address.port}`
   childEnv.HTTP_PROXY = url
   childEnv.HTTPS_PROXY = url
+
   return {
     url,
     caPath: authority.caPath,
@@ -197,8 +219,13 @@ async function startLocalAgentProxyInternal<
     childEnv,
     async stop() {
       if (stopped) return
+
       stopped = true
-      for (const socket of sockets) socket.destroy()
+
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+
       await new Promise<void>((resolve) => server.close(() => resolve()))
       await authority.cleanup()
     },
@@ -244,6 +271,7 @@ export class AgentProxy<
 
   async start(): Promise<this> {
     if (this.#current) return this
+
     if (!this.#starting) {
       this.#starting = startLocalAgentProxyInternal(this.#options).then((proxy) => {
         this.#current = proxy
@@ -251,7 +279,9 @@ export class AgentProxy<
         return proxy
       })
     }
+
     const starting = this.#starting
+
     try {
       await starting
     } finally {
@@ -262,14 +292,19 @@ export class AgentProxy<
 
   async stop(): Promise<void> {
     if (this.#starting) await this.#starting
+
     const proxy = this.#current
     this.#current = undefined
+
     await proxy?.stop()
   }
 
   private active(): LocalAgentProxy<Extract<keyof Bindings, string>> {
     const proxy = this.#current ?? this.#last
-    if (!proxy) throw new Error('Agent Proxy has not been started')
+    if (!proxy) {
+      throw new Error('Agent Proxy has not been started')
+    }
+
     return proxy
   }
 }
@@ -292,13 +327,16 @@ function handleTlsRequest(
 ): void {
   const server = createHttpServer((request, response) => {
     if (isDenied(host, options)) return writeError(response, 'proxy.host_denied')
+
     const credential = injectCredential(request, host, options, placeholders)
     if (credential) return writeError(response, credential)
+
     if (
       !isEgressAllowed(host, options) &&
       !hasAuthorizedCredential(request, host, options, placeholders)
     )
       return writeError(response, 'proxy.host_denied')
+
     forwardHttps(request, response, host, port)
   })
   server.emit('connection', socket)
@@ -315,15 +353,23 @@ function injectCredential(
     const header = binding.header.toLowerCase()
     const expected = binding.valueTemplate.replace('{secret}', placeholder)
     const value = request.headers[header]
+
     if (value !== expected) continue
-    if (isDenied(host, options) || !matchesHost(host, binding.hosts))
+
+    if (isDenied(host, options) || !matchesHost(host, binding.hosts)) {
       return 'proxy.credential_host_denied'
+    }
+
     request.headers[header] = binding.valueTemplate.replace('{secret}', binding.secret)
     return undefined
   }
-  for (const value of Object.values(request.headers))
-    if (typeof value === 'string' && value.includes('${STASHBASE_'))
+
+  for (const value of Object.values(request.headers)) {
+    if (typeof value === 'string' && value.includes('${STASHBASE_')) {
       return 'proxy.unknown_placeholder'
+    }
+  }
+
   return undefined
 }
 
@@ -352,8 +398,11 @@ function handlePlainRequest(
   } catch {
     return writeError(response, 'proxy.request_invalid')
   }
-  if (destination.protocol !== 'http:' || !isEgressAllowed(destination.hostname, options))
+
+  if (destination.protocol !== 'http:' || !isEgressAllowed(destination.hostname, options)) {
     return writeError(response, 'proxy.host_denied')
+  }
+
   const upstream = httpRequest(
     destination,
     { method: request.method, headers: request.headers },
@@ -362,6 +411,7 @@ function handlePlainRequest(
       upstreamResponse.pipe(response)
     }
   )
+
   upstream.on('error', () => response.end())
   request.pipe(upstream)
 }
@@ -373,6 +423,7 @@ function forwardHttps(
   port: number
 ): void {
   const authority = port === 443 ? host : `${host}:${port}`
+
   const upstream = httpsRequest(
     {
       hostname: host,
@@ -391,8 +442,12 @@ function forwardHttps(
       upstreamResponse.pipe(response)
     }
   )
+
   upstream.on('error', () => {
-    if (!response.headersSent) response.writeHead(502, { connection: 'close' })
+    if (!response.headersSent) {
+      response.writeHead(502, { connection: 'close' })
+    }
+
     response.end()
   })
   request.pipe(upstream)
