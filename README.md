@@ -16,7 +16,7 @@ local proxy. The agent and its tools receive only the generated placeholder.
 ```ts
 import OpenAI from 'openai'
 import { createEnvironmentClient } from '@stashbase/node-sdk'
-import { AgentProxy, createOpenAIProxyClient } from '@stashbase/agent-proxy'
+import { AgentProxy } from '@stashbase/agent-proxy'
 
 const stashbase = createEnvironmentClient(process.env.STASHBASE_API_KEY!)
 const secretResponse = await stashbase.secrets.get('GITHUB_TOKEN')
@@ -40,9 +40,8 @@ const proxy = new AgentProxy({
 
 await proxy.start()
 
-const openai = createOpenAIProxyClient(
-  new OpenAI({ apiKey: process.env.OPENAI_API_KEY! }),
-  { proxy }
+const openai = proxy.createOpenAIClient(
+  new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
 )
 
 try {

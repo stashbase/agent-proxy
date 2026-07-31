@@ -29,6 +29,7 @@ it('supports an explicit construct, start, stop, and restart lifecycle', async (
   proxies.push(proxy)
   expect(proxy.started).toBe(true)
   expect(proxy.placeholders.OPENAI_API_KEY).toBe('${STASHBASE_OPENAI_API_KEY}')
+  expect(proxy.createOpenAIClient(OpenAI)).toBeInstanceOf(OpenAI)
   const firstUrl = proxy.url
 
   await proxy.stop()

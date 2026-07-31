@@ -8,13 +8,17 @@ import { request as httpsRequest } from 'node:https'
 import type { Socket } from 'node:net'
 import { createSecureContext, TLSSocket } from 'node:tls'
 import { createCertificateAuthority } from './certificates'
+import { createOpenAIProxyClient } from './openai-fetch'
 import type {
   AgentProxyBinding,
   AgentProxyError,
   AgentProxyErrorCode,
+  CreateOpenAIProxyClientOptions,
   LocalAgentProxy,
+  OpenAIClientConstructor,
   StartLocalAgentProxyOptions,
 } from './types'
+import type OpenAI from 'openai'
 
 type ResolvedOptions = Omit<StartLocalAgentProxyOptions, 'bindings'> & {
   bindings: Record<string, AgentProxyBinding & { header: string; valueTemplate: string }>
@@ -267,6 +271,18 @@ export class AgentProxy<
 
   get childEnv(): Record<string, string> {
     return this.active().childEnv
+  }
+
+  /**
+   * Creates or wraps an OpenAI client so its HTTPS transport uses this proxy.
+   * Pass the OpenAI constructor to use the configured OPENAI_API_KEY binding,
+   * or pass an existing client to preserve its application-owned API key.
+   */
+  createOpenAIClient(
+    openai: OpenAI | OpenAIClientConstructor,
+    options: Omit<CreateOpenAIProxyClientOptions, 'proxy'> = {}
+  ): OpenAI {
+    return createOpenAIProxyClient(openai, { ...options, proxy: this })
   }
 
   async start(): Promise<this> {
