@@ -6,6 +6,57 @@ Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit life
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. The OpenAI client is the first dedicated SDK adapter; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
+## Use with the Stashbase Node SDK
+
+`@stashbase/agent-proxy` is standalone: it does not require the Stashbase Node
+SDK at runtime. They work well together, however, because the trusted
+application can use the SDK to resolve a secret and pass it directly to the
+local proxy. The agent and its tools receive only the generated placeholder.
+
+```ts
+import OpenAI from 'openai'
+import { createEnvironmentClient } from '@stashbase/node-sdk'
+import { AgentProxy, createOpenAIProxyClient } from '@stashbase/agent-proxy'
+
+const stashbase = createEnvironmentClient(process.env.STASHBASE_API_KEY!)
+const secretResponse = await stashbase.secrets.get('GITHUB_TOKEN')
+
+if (!secretResponse.ok) {
+  throw new Error(`Could not load GITHUB_TOKEN: ${secretResponse.error.message}`)
+}
+
+const proxy = new AgentProxy({
+  // Allow model requests without granting this egress permission to GitHub.
+  egressHosts: ['api.openai.com'],
+  bindings: {
+    GITHUB_TOKEN: {
+      secret: secretResponse.data.value,
+      hosts: ['api.github.com'],
+      header: 'authorization',
+      env: 'GITHUB_TOKEN',
+    },
+  },
+})
+
+await proxy.start()
+
+const openai = createOpenAIProxyClient(
+  new OpenAI({ apiKey: process.env.OPENAI_API_KEY! }),
+  { proxy }
+)
+
+try {
+  // Run agent code with `openai`. GitHub tools receive only
+  // `${STASHBASE_GITHUB_TOKEN}`, never secretResponse.data.value.
+} finally {
+  await proxy.stop()
+}
+```
+
+The dependency direction is intentional: the application owns Stashbase SDK
+authentication and secret resolution; Agent Proxy owns the short-lived local
+credential boundary. This package never imports or requires the Node SDK.
+
 ## Why use it
 
 Agent frameworks, tool workers, logs, and model-provider requests often cross
@@ -34,7 +85,7 @@ only at the final outbound request. This provides several practical benefits:
 
 - **Reduces environment leakage.** Each tool invocation starts with a fresh,
   minimal environment. It receives only configured placeholders and proxy/CA
-settings, rather than inheriting every credential from the parent process.
+  settings, rather than inheriting every credential from the parent process.
 
 - **Leaves less persistent material behind.** The proxy uses a disposable CA
   and cleans its temporary certificate material when `stop()` is called. The
