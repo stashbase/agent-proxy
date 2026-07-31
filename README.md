@@ -6,6 +6,22 @@ Use `startLocalAgentProxy()` for lifecycle management and `createOpenAIProxyClie
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. The OpenAI client is the first dedicated SDK adapter; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
+## Security boundary
+
+This package is designed to keep resolved secrets out of agent and tool inputs,
+environment variables, and normal logs. It is not a defense against code running
+with the same operating-system user as the trusted application: that code can
+inspect the application's process or files. Keep the trusted application and
+proxy on a dedicated account or host when that is in scope for your threat model.
+
+Treat `egressHosts`, `denyHosts`, and binding `hosts` as a strict allowlist. The
+proxy rejects malformed CONNECT destinations, only accepts configured credential
+placeholders, and prevents per-tool environment overrides from replacing proxy
+transport settings or placeholders. OS network sandboxing is opt-in: macOS uses
+`sandbox-exec`, Linux requires a systemd user session, and Windows is currently
+unsupported. Applications must still validate tool inputs and authorize the
+operations their tools perform.
+
 ## Sandboxed OpenAI Agents SDK tools
 
 For tool code the agent should not run in the trusted application process, create a worker-backed executor and use it as the normal `execute` callback of an OpenAI Agents SDK function tool:
