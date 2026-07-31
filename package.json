@@ -1,0 +1,52 @@
+{
+  "name": "@stashbase/agent-proxy",
+  "version": "0.1.0",
+  "description": "A proxy for AI Agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stashbase/agent-proxy.git"
+  },
+  "homepage": "https://github.com/stashbase/agent-proxy#readme",
+  "bugs": {
+    "url": "https://github.com/stashbase/agent-proxy/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.txt"
+  ],
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "test": "npm run build && vitest --config vitest.config.ts --run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "node-forge": "^1.4.0",
+    "openai": "^7.1.0"
+  },
+  "devDependencies": {
+    "@openai/agents": "^0.14.1",
+    "@types/node": "^25.9.3",
+    "@types/node-forge": "^1.3.14",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}
