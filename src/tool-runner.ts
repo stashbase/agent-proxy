@@ -108,18 +108,22 @@ function childEnvironment(proxy: LocalAgentProxy, extra: Record<string, string> 
   )
   // Do not inherit the parent's arbitrary environment: it may contain unrelated
   // provider credentials. The proxy adds only its placeholders and transport vars.
-  return { ...safeRuntimeEnvironment, ...proxy.childEnv, ...extra }
+  // Proxy transport settings and placeholders must win over user-provided
+  // tool environment values so a caller cannot accidentally bypass the proxy
+  // or replace a placeholder with a credential.
+  return { ...safeRuntimeEnvironment, ...extra, ...proxy.childEnv }
 }
 
-function sandboxCommand(
+export function sandboxCommand(
   proxy: LocalAgentProxy,
-  sandbox: boolean
+  sandbox: boolean,
+  platform = process.platform
 ): { command: string; args: string[] } {
   if (!sandbox) return { command: process.execPath, args: [] }
   const proxyUrl = new URL(proxy.url)
   if (proxyUrl.hostname !== '127.0.0.1' || !proxyUrl.port)
     throw new Error('Sandboxed tool requires a localhost Agent Proxy URL')
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     const profile = `
       (version 1)
       (allow default)
@@ -129,7 +133,7 @@ function sandboxCommand(
     `
     return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, process.execPath] }
   }
-  if (process.platform === 'linux') {
+  if (platform === 'linux') {
     return {
       command: 'systemd-run',
       args: [

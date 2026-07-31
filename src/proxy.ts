@@ -61,9 +61,13 @@ function matchesHost(host: string, patterns: string[]): boolean {
 }
 
 function parseAuthority(value: string): { host: string; port: number } | undefined {
+  // CONNECT uses authority-form only. Reject paths, credentials, and fragments
+  // rather than letting URL parsing silently normalize them into a destination.
+  if (!value || /[/?#@]/.test(value)) return undefined
   try {
     const url = new URL(`http://${value}`)
-    return url.hostname
+    const port = Number(url.port || 443)
+    return url.hostname && Number.isInteger(port) && port > 0 && port <= 65_535
       ? { host: url.hostname.toLowerCase(), port: Number(url.port || 443) }
       : undefined
   } catch {
