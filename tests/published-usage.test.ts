@@ -5,6 +5,7 @@ import forge from 'node-forge'
 import OpenAI from 'openai'
 // Deliberately import the built workspace package, as an application does after publishing.
 import {
+  AgentProxy,
   createOpenAIProxyClient,
   createSandboxedToolExecutor,
   startLocalAgentProxy,
@@ -14,6 +15,26 @@ import {
 const proxies: LocalAgentProxy[] = []
 afterEach(async () => {
   await Promise.all(proxies.splice(0).map((proxy) => proxy.stop()))
+})
+
+it('supports an explicit construct, start, stop, and restart lifecycle', async () => {
+  const proxy = new AgentProxy({
+    egressHosts: [],
+    bindings: { OPENAI_API_KEY: { secret: 'real-secret-value', hosts: ['api.openai.com'] } },
+  })
+
+  expect(proxy.started).toBe(false)
+  expect(() => proxy.url).toThrow('has not been started')
+  await proxy.start()
+  proxies.push(proxy)
+  expect(proxy.started).toBe(true)
+  expect(proxy.placeholders.OPENAI_API_KEY).toBe('${STASHBASE_OPENAI_API_KEY}')
+  const firstUrl = proxy.url
+
+  await proxy.stop()
+  expect(proxy.started).toBe(false)
+  await proxy.start()
+  expect(proxy.url).not.toBe(firstUrl)
 })
 
 function certificate(): { cert: string; key: string } {

@@ -1,5 +1,5 @@
 export { createOpenAIProxyClient, createOpenAIProxyFetch } from './openai-fetch'
-export { startLocalAgentProxy } from './proxy'
+export { AgentProxy, startLocalAgentProxy } from './proxy'
 export { createSandboxedToolExecutor, runSandboxedTool } from './tool-runner'
 export type {
   AgentProxyBinding,

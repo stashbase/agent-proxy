@@ -103,7 +103,7 @@ function validateOptions(options: StartLocalAgentProxyOptions): void {
  * secret exposure, but does not isolate against malicious same-user code that
  * can inspect the Node process or its memory.
  */
-export async function startLocalAgentProxy<
+async function startLocalAgentProxyInternal<
   const Bindings extends Record<string, AgentProxyBinding>,
 >(
   options: Omit<StartLocalAgentProxyOptions, 'bindings'> & { bindings: Bindings }
@@ -203,6 +203,84 @@ export async function startLocalAgentProxy<
       await authority.cleanup()
     },
   }
+}
+
+/**
+ * An explicit lifecycle wrapper for a local Agent Proxy. Construct it with its
+ * policy, then call start() when the trusted application is ready to bind a
+ * local port. stop() is safe to call repeatedly and permits a later restart.
+ */
+export class AgentProxy<
+  const Bindings extends Record<string, AgentProxyBinding> = Record<string, AgentProxyBinding>,
+> implements LocalAgentProxy<Extract<keyof Bindings, string>> {
+  #options: Omit<StartLocalAgentProxyOptions, 'bindings'> & { bindings: Bindings }
+  #current?: LocalAgentProxy<Extract<keyof Bindings, string>>
+  #last?: LocalAgentProxy<Extract<keyof Bindings, string>>
+  #starting?: Promise<LocalAgentProxy<Extract<keyof Bindings, string>>>
+
+  constructor(options: Omit<StartLocalAgentProxyOptions, 'bindings'> & { bindings: Bindings }) {
+    this.#options = options
+  }
+
+  get started(): boolean {
+    return this.#current !== undefined
+  }
+
+  get url(): string {
+    return this.active().url
+  }
+
+  get caPath(): string {
+    return this.active().caPath
+  }
+
+  get placeholders(): LocalAgentProxy<Extract<keyof Bindings, string>>['placeholders'] {
+    return this.active().placeholders
+  }
+
+  get childEnv(): Record<string, string> {
+    return this.active().childEnv
+  }
+
+  async start(): Promise<this> {
+    if (this.#current) return this
+    if (!this.#starting) {
+      this.#starting = startLocalAgentProxyInternal(this.#options).then((proxy) => {
+        this.#current = proxy
+        this.#last = proxy
+        return proxy
+      })
+    }
+    const starting = this.#starting
+    try {
+      await starting
+    } finally {
+      if (this.#starting === starting) this.#starting = undefined
+    }
+    return this
+  }
+
+  async stop(): Promise<void> {
+    if (this.#starting) await this.#starting
+    const proxy = this.#current
+    this.#current = undefined
+    await proxy?.stop()
+  }
+
+  private active(): LocalAgentProxy<Extract<keyof Bindings, string>> {
+    const proxy = this.#current ?? this.#last
+    if (!proxy) throw new Error('Agent Proxy has not been started')
+    return proxy
+  }
+}
+
+/** Starts a local Agent Proxy immediately. Prefer AgentProxy for explicit lifecycle control. */
+export async function startLocalAgentProxy<
+  const Bindings extends Record<string, AgentProxyBinding>,
+>(
+  options: Omit<StartLocalAgentProxyOptions, 'bindings'> & { bindings: Bindings }
+): Promise<AgentProxy<Bindings>> {
+  return new AgentProxy(options).start()
 }
 
 function handleTlsRequest(
