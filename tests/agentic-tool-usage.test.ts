@@ -117,7 +117,7 @@ it('lists GitHub-style repositories through the proxy without exposing the token
     const listRepos = tool({
       name: 'list_github_repositories',
       description: 'List repositories available to the configured GitHub account',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       async execute() {
         return executor.execute({})
       },

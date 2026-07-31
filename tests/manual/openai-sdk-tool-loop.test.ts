@@ -50,7 +50,7 @@ it.skipIf(!runLiveTest)(
       name: 'list_github_repositories',
       description: 'List repositories available to the configured GitHub account.',
       strict: true,
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
     }
 
     const firstResponse = await sdk.responses.create({
