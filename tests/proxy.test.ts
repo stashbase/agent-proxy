@@ -282,6 +282,19 @@ describe('local agent proxy policy', () => {
     expect(result).toContain('proxy.host_denied')
   })
 
+  it('rejects malformed CONNECT authorities before opening a TLS session', async () => {
+    const proxy = await start()
+    const { port } = new URL(proxy.url)
+    const result = await new Promise<string>((resolve) => {
+      const socket = connect(Number(port), '127.0.0.1', () =>
+        socket.write('CONNECT api.openai.com:443/not-authority-form HTTP/1.1\r\n\r\n')
+      )
+      socket.on('data', (data) => resolve(data.toString()))
+    })
+    expect(result).toContain('403 Forbidden')
+    expect(result).toContain('proxy.host_denied')
+  })
+
   it('denies unknown placeholders', async () => {
     const proxy = await start()
     const result = await throughTls(

@@ -110,7 +110,9 @@ it('lists GitHub-style repositories through the proxy without exposing the token
       proxy,
       module: new URL('./fixtures/tool-worker.mjs', import.meta.url),
       exportName: 'listGitHubRepos',
-      sandbox: true,
+      // The sandbox launcher is integration-tested on macOS; Linux and Windows
+      // still exercise the same placeholder-only worker path in portable CI.
+      sandbox: process.platform === 'darwin',
     })
     const listRepos = tool({
       name: 'list_github_repositories',

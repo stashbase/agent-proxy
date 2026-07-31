@@ -34,7 +34,8 @@
   ],
   "scripts": {
     "build": "tsup --config tsup.config.ts",
-    "test": "npm run build && vitest --config vitest.config.ts --run",
+    "test": "npm run build && vitest --config vitest.config.mts --run",
+    "audit:production": "npm audit --omit=dev --audit-level=high",
     "prepack": "npm run build"
   },
   "dependencies": {

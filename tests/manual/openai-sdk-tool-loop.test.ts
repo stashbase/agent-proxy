@@ -24,9 +24,9 @@ it.skipIf(!runLiveTest)(
     const proxy = await startLocalAgentProxy({
       egressHosts: [],
       bindings: {
-        OPENAI_API_KEY: { secret: '', hosts: ['api.openai.com'] },
+        OPENAI_API_KEY: { secret: process.env.OPENAI_API_KEY!, hosts: ['api.openai.com'] },
         GITHUB_TOKEN: {
-          secret: '',
+          secret: process.env.GITHUB_TOKEN!,
           hosts: ['api.github.com'],
           header: 'authorization',
           env: 'GITHUB_TOKEN',
@@ -37,10 +37,7 @@ it.skipIf(!runLiveTest)(
 
     // This OpenAI client receives a placeholder API key; its custom fetch routes
     // model requests through the same local proxy that owns the real key.
-    const sdk = new OpenAI({
-      baseURL: process.env.OPENAI_API_BASE_URL ?? proxy.url,
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-    })
+    const sdk = createOpenAIProxyClient(OpenAI, { proxy })
     const executor = createSandboxedToolExecutor({
       proxy,
       module: new URL('../fixtures/tool-worker.mjs', import.meta.url),

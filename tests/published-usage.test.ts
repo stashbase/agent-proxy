@@ -130,3 +130,32 @@ it('runs a normal agent-tool callback in an isolated placeholder-only worker', a
   expect(result.httpsProxy).toBe(proxy.url)
   expect(JSON.stringify(result)).not.toContain('real-github-secret')
 })
+
+it('does not allow tool-specific environment values to replace proxy settings or placeholders', async () => {
+  const proxy = await startLocalAgentProxy({
+    egressHosts: [],
+    bindings: {
+      GITHUB_TOKEN: {
+        secret: 'real-github-secret',
+        hosts: ['api.github.com'],
+        header: 'authorization',
+        env: 'GITHUB_TOKEN',
+      },
+    },
+  })
+  proxies.push(proxy)
+  const worker = createSandboxedToolExecutor({
+    proxy,
+    module: new URL('./fixtures/tool-worker.mjs', import.meta.url),
+    exportName: 'inspectEnvironment',
+    env: {
+      GITHUB_TOKEN: 'attempted-secret-override',
+      HTTPS_PROXY: 'http://bypass.invalid',
+    },
+  })
+
+  await expect(worker.execute({ issue: 'environment-precedence' })).resolves.toMatchObject({
+    githubToken: proxy.placeholders.GITHUB_TOKEN,
+    httpsProxy: proxy.url,
+  })
+})
