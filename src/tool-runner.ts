@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import type { LocalAgentProxy, SandboxedToolExecutor, SandboxedToolOptions } from './types'
 
 type WorkerReply = { ok: true; value: unknown } | { ok: false; message: string }
@@ -19,6 +19,8 @@ const inheritedEnvironmentAllowList = [
   'SystemRoot',
   'ComSpec',
 ]
+
+let linuxSandboxAvailable = false
 
 // Kept inline so both ESM and CommonJS package consumers can launch the same
 // worker without relying on a sibling asset path at runtime.
@@ -55,6 +57,11 @@ export function runSandboxedTool<Input, Output = unknown>(
   input: Input
 ): Promise<Output> {
   const module = normalizeModule(options.module)
+
+  if (options.sandbox === true && process.platform === 'linux') {
+    assertLinuxSandboxAvailable()
+  }
+
   const { command, args } = sandboxCommand(options.proxy, options.sandbox === true)
   const child = spawn(command, [...args, '-e', workerProgram], {
     env: childEnvironment(options.proxy, options.env),
@@ -64,6 +71,11 @@ export function runSandboxedTool<Input, Output = unknown>(
 
   return new Promise<Output>((resolve, reject) => {
     let settled = false
+    let stderr = ''
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
 
     const finish = (callback: () => void) => {
       if (settled) return
@@ -80,9 +92,14 @@ export function runSandboxedTool<Input, Output = unknown>(
     child.once('error', (cause) => finish(() => reject(cause)))
     child.once('exit', (code, signal) => {
       if (!settled) {
+        const detail = stderr.trim()
+        const suffix = detail ? `: ${detail}` : ''
+
         finish(() =>
           reject(
-            new Error(`Sandboxed tool exited before returning a result (${signal ?? code ?? 1})`)
+            new Error(
+              `Sandboxed tool exited before returning a result (${signal ?? code ?? 1})${suffix}`
+            )
           )
         )
       }
@@ -125,6 +142,27 @@ function childEnvironment(proxy: LocalAgentProxy, extra: Record<string, string> 
   // tool environment values so a caller cannot accidentally bypass the proxy
   // or replace a placeholder with a credential.
   return { ...safeRuntimeEnvironment, ...extra, ...proxy.childEnv }
+}
+
+function assertLinuxSandboxAvailable(): void {
+  if (linuxSandboxAvailable) return
+
+  const probe = spawnSync(
+    'systemd-run',
+    ['--user', '--scope', '--quiet', process.execPath, '-e', ''],
+    { encoding: 'utf8', timeout: 5_000 }
+  )
+
+  if (probe.status === 0) {
+    linuxSandboxAvailable = true
+    return
+  }
+
+  const detail = [probe.error?.message, probe.stderr?.trim()].filter(Boolean).join(': ')
+  throw new Error(
+    `Linux sandbox requires a running systemd user manager accessible to this process${detail ? ` (${detail})` : ''}. ` +
+      'It is not supported in Docker, ECS/Fargate, or other environments without one.'
+  )
 }
 
 export function sandboxCommand(

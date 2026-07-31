@@ -34,7 +34,7 @@ only at the final outbound request. This provides several practical benefits:
 
 - **Reduces environment leakage.** Each tool invocation starts with a fresh,
   minimal environment. It receives only configured placeholders and proxy/CA
-  settings, rather than inheriting every credential from the parent process.
+settings, rather than inheriting every credential from the parent process.
 
 - **Leaves less persistent material behind.** The proxy uses a disposable CA
   and cleans its temporary certificate material when `stop()` is called. The
@@ -45,6 +45,31 @@ The API provider that authenticates a request necessarily receives its real
 credential in the request header. Agent Proxy prevents the credential from
 being handed to agent code and model context; it does not prevent a tool from
 returning sensitive data that it fetched with an authorized credential.
+
+## Platform support
+
+The proxy and placeholder-only worker run on Node.js 20+ platforms. The optional
+`sandbox: true` network restriction has narrower operating-system support:
+
+- **macOS:** supported with the system `sandbox-exec` utility.
+
+- **Linux systemd hosts:** supported when the calling user has a running,
+  accessible systemd user manager. Agent Proxy checks this before starting a
+  sandboxed worker and reports a configuration error if it is unavailable.
+  This is appropriate for a configured VM or bare-metal server.
+
+- **Docker, ECS/Fargate, and minimal Linux images:** the proxy and ordinary
+  worker mode work, but `sandbox: true` is unsupported because these
+  environments do not normally expose a systemd user manager. Use deployment-
+  level isolation for untrusted tools instead.
+
+- **Windows:** `sandbox: true` is currently unsupported.
+
+To verify a configured Linux host, run the opt-in end-to-end sandbox check:
+
+```sh
+RUN_AGENT_PROXY_LINUX_SANDBOX_TEST=1 bun run test -- tests/manual/linux-sandbox.test.ts
+```
 
 ## Security boundary
 
