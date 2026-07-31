@@ -6,6 +6,46 @@ Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit life
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. The OpenAI client is the first dedicated SDK adapter; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
+## Why use it
+
+Agent frameworks, tool workers, logs, and model-provider requests often cross
+trust boundaries. Passing a raw token through each of those layers makes an
+accidental leak easy: a debugging statement, a serialized tool result, or an
+agent prompt can expose a credential that was only meant for an API request.
+
+Agent Proxy keeps that credential in the trusted application and supplies it
+only at the final outbound request. This provides several practical benefits:
+
+- **Keeps credentials out of agent context.** Agents and tool workers receive
+  predictable placeholders, not real token values. The credential therefore
+  cannot accidentally appear in prompts, tool arguments, normal worker logs,
+  or a tool result merely because the worker inspected its environment.
+
+- **Applies least privilege at the network boundary.** A binding names the
+  destination hosts and header into which its placeholder may be injected. An
+  OpenAI key cannot be used for GitHub, and a GitHub token cannot be forwarded
+  to an arbitrary host. `egressHosts` and `denyHosts` provide a separate
+  destination allowlist for requests that do not need a credential.
+
+- **Works with familiar application code.** The OpenAI adapter lets a trusted
+  Node application use the official SDK while routing transport through the
+  local policy. Worker-backed tools can use standard proxy-aware HTTPS clients
+  or Node `fetch` without receiving the resolved secret.
+
+- **Reduces environment leakage.** Each tool invocation starts with a fresh,
+  minimal environment. It receives only configured placeholders and proxy/CA
+  settings, rather than inheriting every credential from the parent process.
+
+- **Leaves less persistent material behind.** The proxy uses a disposable CA
+  and cleans its temporary certificate material when `stop()` is called. The
+  secret is not written to the worker environment or to the proxy's public
+  handle.
+
+The API provider that authenticates a request necessarily receives its real
+credential in the request header. Agent Proxy prevents the credential from
+being handed to agent code and model context; it does not prevent a tool from
+returning sensitive data that it fetched with an authorized credential.
+
 ## Security boundary
 
 This package is designed to keep resolved secrets out of agent and tool inputs,
