@@ -2,6 +2,16 @@
 
 Experimental Node.js 20+ local Agent Proxy. It exposes placeholders to an agent harness and injects credentials only where a configured policy permits it, over a temporary locally trusted TLS interception connection. The trusted application resolves each secret (for example, with the main Stashbase SDK) before creating its binding.
 
+**A focused harness-level security primitive for agent tools:** let an agent use
+GitHub, Stripe, or an internal API without handing its real credential to the
+agent, tool worker, logs, or model context. A tool receives a placeholder and
+can reach only the destinations its policy permits; the local proxy injects the
+real value only into the authorized outbound API request.
+
+It is designed to fit an existing Node application and secret store. You do not
+need a separate agent runtime, remote sandbox service, or a replacement for your
+current framework.
+
 Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. Use `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` with the official OpenAI SDK. The `egressHosts`, `denyHosts`, and `bindings` policy matches CLI agent profile semantics. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. The OpenAI client is the first dedicated SDK adapter; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
