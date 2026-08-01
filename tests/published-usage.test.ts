@@ -131,15 +131,16 @@ it('runs a normal agent-tool callback in an isolated placeholder-only worker', a
   // This is the same `execute` callback shape used by @openai/agents tool().
   const previousCredential = process.env.UNRELATED_PARENT_CREDENTIAL
   process.env.UNRELATED_PARENT_CREDENTIAL = 'must-not-reach-worker'
-  let result: {
+  type WorkerResult = {
     input: { issue: string }
     githubToken?: string
     stashbaseApiKey: string | null
     unrelatedCredential: string | null
     httpsProxy?: string
   }
+  let result: WorkerResult
   try {
-    result = await worker.execute({ issue: 'SDK-agent' })
+    result = await worker.execute<{ issue: string }, WorkerResult>({ issue: 'SDK-agent' })
   } finally {
     if (previousCredential === undefined) delete process.env.UNRELATED_PARENT_CREDENTIAL
     else process.env.UNRELATED_PARENT_CREDENTIAL = previousCredential

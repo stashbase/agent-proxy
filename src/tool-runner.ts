@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import type {
   LocalAgentProxy,
   SandboxedToolExecutor,
+  SandboxedToolExportName,
   SandboxedToolModule,
   SandboxedToolModuleOptions,
   SandboxedToolOptions,
@@ -61,13 +62,15 @@ export function createSandboxedToolExecutor(options: SandboxedToolOptions): Sand
  * Configures one sandboxed tool module and exposes explicitly selected exports.
  * Each executor invocation still starts a fresh isolated worker process.
  */
-export function createSandboxedToolModule(
+export function createSandboxedToolModule<
+  Exports extends object = Record<string, (...args: any[]) => unknown>,
+>(
   options: SandboxedToolModuleOptions
-): SandboxedToolModule {
+): SandboxedToolModule<Exports> {
   const moduleOptions = { ...options }
 
   return {
-    export(exportName) {
+    export<Name extends SandboxedToolExportName<Exports>>(exportName: Name) {
       if (!exportName.trim()) {
         throw new Error('Sandboxed tool export name must not be empty')
       }

@@ -83,14 +83,37 @@ export type SandboxedToolExecutor = {
   execute<Input, Output = unknown>(input: Input): Promise<Output>
 }
 
+/** A sandboxed executor whose input and output were derived from a typed module export. */
+export type TypedSandboxedToolExecutor<Input, Output> = {
+  execute(input: Input): Promise<Output>
+}
+
 /** Shared worker configuration for several explicitly allowed exports of one module. */
 export type SandboxedToolModuleOptions = Omit<SandboxedToolOptions, 'exportName'>
+
+export type SandboxedToolExportName<Exports extends object> = Extract<
+  {
+    [Name in keyof Exports]: Exports[Name] extends (...args: any[]) => unknown ? Name : never
+  }[keyof Exports],
+  string
+>
+
+export type SandboxedToolExportInput<Exports extends object, Name extends keyof Exports> =
+  Exports[Name] extends (input: infer Input, ...args: any[]) => unknown ? Input : never
+
+export type SandboxedToolExportOutput<Exports extends object, Name extends keyof Exports> =
+  Exports[Name] extends (...args: any[]) => infer Output ? Awaited<Output> : never
 
 /**
  * Creates per-export executors without repeating shared module and sandbox policy.
  * Selecting an export remains explicit application-owned configuration.
  */
-export type SandboxedToolModule = {
-  export(exportName: string): SandboxedToolExecutor
+export type SandboxedToolModule<Exports extends object = Record<string, (...args: any[]) => unknown>> = {
+  export<Name extends SandboxedToolExportName<Exports>>(
+    exportName: Name
+  ): TypedSandboxedToolExecutor<
+    SandboxedToolExportInput<Exports, Name>,
+    SandboxedToolExportOutput<Exports, Name>
+  >
 }
 import type OpenAI from 'openai'

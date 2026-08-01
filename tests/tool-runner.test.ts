@@ -28,8 +28,26 @@ it('creates explicit per-export executors from one module configuration', async 
     module: new URL('./fixtures/tool-worker.mjs', import.meta.url),
   })
 
-  await expect(tools.export('inspectEnvironment').execute({ issue: 'module-api' })).resolves.toMatchObject({
+  await expect(
+    tools.export('inspectEnvironment').execute({ issue: 'module-api' })
+  ).resolves.toMatchObject({
     input: { issue: 'module-api' },
   })
   expect(() => tools.export('')).toThrow('must not be empty')
+})
+
+it('constrains exports and execution input from a declared module type', async () => {
+  type GitHubTools = typeof import('./fixtures/tool-worker.mjs')
+
+  const tools = createSandboxedToolModule<GitHubTools>({
+    proxy,
+    module: new URL('./fixtures/tool-worker.mjs', import.meta.url),
+  })
+  const inspectEnvironment = tools.export('inspectEnvironment')
+
+  await expect(inspectEnvironment.execute({ issue: 'typed-module-api' })).resolves.toMatchObject({
+    input: { issue: 'typed-module-api' },
+  })
+
+  tools.export('inspectEnvironment')
 })

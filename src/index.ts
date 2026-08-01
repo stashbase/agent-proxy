@@ -16,9 +16,13 @@ export type {
   LocalAgentProxy,
   SecretPlaceholder,
   SandboxedToolExecutor,
+  SandboxedToolExportName,
+  SandboxedToolExportInput,
+  SandboxedToolExportOutput,
   SandboxedToolModule,
   SandboxedToolModuleOptions,
   SandboxedToolOptions,
+  TypedSandboxedToolExecutor,
   OpenAIClientConstructor,
   StartLocalAgentProxyOptions,
 } from "./types";

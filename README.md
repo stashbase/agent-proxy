@@ -203,3 +203,35 @@ const createIssue = github.export('createIssue')
 ```
 
 Creating these executors does not create workers. Each `execute()` call still gets a fresh sandboxed process.
+
+For optional compile-time checks of export names and input/output values, pass
+the module type as a generic. Use `typeof import(...)` (or `import type`) so the
+trusted application does not execute the tool module merely to obtain its types.
+The string remains necessary at runtime because the worker imports the module in
+a separate process, but TypeScript prevents selecting an undeclared export:
+
+```ts
+type GitHubTools = typeof import('./tools/github.mjs')
+
+const github = createSandboxedToolModule<GitHubTools>({
+  proxy,
+  module: new URL('./tools/github.mjs', import.meta.url),
+  sandbox: true,
+})
+
+const listRepositories = github.export('listRepositories')
+await listRepositories.execute({ organization: 'stashbase' })
+
+// TypeScript error: this export was not declared in GitHubTools.
+github.export('deleteRepository')
+```
+
+For a JavaScript tool module without type declarations, use JSDoc or a matching
+`.d.mts` declaration file. You can also declare the minimal shape explicitly:
+
+```ts
+type GitHubTools = {
+  listRepositories: (input: { organization: string }) => Promise<string[]>
+  createIssue: (input: { title: string; body: string }) => Promise<{ url: string }>
+}
+```

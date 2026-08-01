@@ -1,3 +1,6 @@
+/**
+ * @param {{ issue: string }} input
+ */
 export async function inspectEnvironment(input) {
   return {
     input,
