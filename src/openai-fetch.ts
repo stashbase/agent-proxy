@@ -23,7 +23,13 @@ export function createOpenAIProxyFetch(proxy: LocalAgentProxy): typeof fetch {
       throw new TypeError('Agent Proxy fetch only supports HTTPS URLs')
     }
 
-    const socket = await openTunnel(proxyUrl, url.hostname, Number(url.port || 443), ca)
+    const socket = await openTunnel(
+      proxyUrl,
+      url.hostname,
+      Number(url.port || 443),
+      ca,
+      request.signal
+    )
 
     return new Promise<Response>((resolve, reject) => {
       const agent = new Agent({ keepAlive: false })
@@ -48,6 +54,14 @@ export function createOpenAIProxyFetch(proxy: LocalAgentProxy): typeof fetch {
         }
       )
       upstream.once('error', reject)
+
+      const abort = () => upstream.destroy(abortError())
+      if (request.signal.aborted) {
+        abort()
+      } else {
+        request.signal.addEventListener('abort', abort, { once: true })
+      }
+      upstream.once('close', () => request.signal.removeEventListener('abort', abort))
 
       if (request.body) {
         Readable.fromWeb(request.body as unknown as NodeReadableStream).pipe(upstream)
@@ -81,30 +95,74 @@ function openTunnel(
   proxyUrl: URL,
   host: string,
   port: number,
-  ca: Buffer
+  ca: Buffer,
+  signal?: AbortSignal
 ): Promise<ReturnType<typeof tlsConnect>> {
   return new Promise((resolve, reject) => {
     const socket = connect(Number(proxyUrl.port), proxyUrl.hostname)
+    let tlsSocket: ReturnType<typeof tlsConnect> | undefined
+    let settled = false
 
-    socket.once('error', reject)
+    function cleanup() {
+      signal?.removeEventListener('abort', abort)
+    }
+
+    function rejectOnce(cause: Error) {
+      if (settled) return
+
+      settled = true
+      cleanup()
+      reject(cause)
+    }
+
+    function resolveOnce(secureSocket: ReturnType<typeof tlsConnect>) {
+      if (settled) return
+
+      settled = true
+      cleanup()
+      resolve(secureSocket)
+    }
+
+    function abort() {
+      const cause = abortError()
+      const activeSocket = tlsSocket ?? socket
+      activeSocket.destroy(cause)
+      rejectOnce(cause)
+    }
+
+    socket.once('error', rejectOnce)
     socket.once('connect', () =>
       socket.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n\r\n`)
     )
+
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+
+    signal?.addEventListener('abort', abort, { once: true })
     let response = ''
 
     socket.on('data', (chunk) => {
+      if (settled) return
+
       response += chunk.toString('latin1')
 
       if (!response.includes('\r\n\r\n')) return
 
       if (!response.startsWith('HTTP/1.1 200')) {
-        return reject(new Error('Agent Proxy denied CONNECT'))
+        socket.destroy()
+        return rejectOnce(new Error(`Agent Proxy denied CONNECT to ${host}`))
       }
 
       socket.removeAllListeners('data')
-      const tlsSocket = tlsConnect({ socket, servername: host, ca })
-      tlsSocket.once('secureConnect', () => resolve(tlsSocket))
-      tlsSocket.once('error', reject)
+      tlsSocket = tlsConnect({ socket, servername: host, ca })
+      tlsSocket.once('secureConnect', () => resolveOnce(tlsSocket!))
+      tlsSocket.once('error', rejectOnce)
     })
   })
+}
+
+function abortError(): DOMException {
+  return new DOMException('The request was aborted', 'AbortError')
 }

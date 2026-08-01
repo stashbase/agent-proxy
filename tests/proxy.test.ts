@@ -4,7 +4,12 @@ import { connect } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { afterEach, describe, expect, it } from 'vitest'
 import forge from 'node-forge'
-import { startLocalAgentProxy, type AgentProxyBinding, type LocalAgentProxy } from '../src'
+import {
+  createOpenAIProxyFetch,
+  startLocalAgentProxy,
+  type AgentProxyBinding,
+  type LocalAgentProxy,
+} from '../src'
 
 const proxies: LocalAgentProxy[] = []
 afterEach(async () => {
@@ -108,6 +113,18 @@ async function withLocalOpenAI(
 }
 
 describe('local agent proxy policy', () => {
+  it('honors an aborted custom fetch request', async () => {
+    const proxy = await start()
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      createOpenAIProxyFetch(proxy)('https://api.openai.com/v1/models', {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   it('never returns real secrets to the harness', async () => {
     const proxy = await start()
     expect(JSON.stringify(proxy)).not.toContain('real-secret-value')
