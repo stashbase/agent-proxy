@@ -35,9 +35,13 @@ if (!secretResponse.ok) {
   throw new Error(`Could not load GITHUB_TOKEN: ${secretResponse.error.message}`)
 }
 
+const openAI = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+})
+
 const proxy = new AgentProxy({
-  // Allow model requests without granting this egress permission to GitHub.
-  egressHosts: ['api.openai.com'],
+  // Allow this model endpoint without granting ordinary egress to GitHub.
+  egressHosts: [new URL(openAI.baseURL).hostname],
   bindings: {
     GITHUB_TOKEN: {
       secret: secretResponse.data.value,
@@ -50,12 +54,10 @@ const proxy = new AgentProxy({
 
 await proxy.start()
 
-const openai = proxy.createOpenAIClient(
-  new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
-)
+const openAIClient = proxy.createOpenAIClient(openAI)
 
 try {
-  // Run agent code with `openai`. GitHub tools receive only
+  // Run agent code with `openAIClient`. GitHub tools receive only
   // `${STASHBASE_GITHUB_TOKEN}`, never secretResponse.data.value.
 } finally {
   await proxy.stop()
