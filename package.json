@@ -1,7 +1,16 @@
 {
   "name": "@stashbase/agent-proxy",
   "version": "0.1.0",
-  "description": "A proxy for AI Agents",
+  "description": "Scoped credential proxy and sandboxed tool runner for AI agents",
+  "keywords": [
+    "stashbase",
+    "ai-agents",
+    "agent-security",
+    "secrets",
+    "sandbox",
+    "openai",
+    "tool-calling"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stashbase/agent-proxy.git"
