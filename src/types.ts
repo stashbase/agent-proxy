@@ -69,7 +69,7 @@ export type SandboxedToolOptions = {
   /** Extra non-secret environment values for this tool. */
   env?: Record<string, string>
 
-  /** Abort an invocation after this duration. Defaults to 30 seconds. */
+  /** Abort an invocation after this duration. The worker receives SIGTERM, then SIGKILL after a short grace period. Defaults to 30 seconds. */
   timeoutMs?: number
 
   /**

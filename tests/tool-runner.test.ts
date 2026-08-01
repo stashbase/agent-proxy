@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest'
-import { createSandboxedToolModule, sandboxCommand } from '../src/tool-runner'
+import {
+  createSandboxedToolExecutor,
+  createSandboxedToolModule,
+  sandboxCommand,
+} from '../src/tool-runner'
 
 const proxy = {
   url: 'http://127.0.0.1:43123',
@@ -56,4 +60,15 @@ it('constrains exports and execution input from a declared module type', async (
   })
 
   tools.export('inspectEnvironment')
+})
+
+it('terminates a worker that exceeds its timeout', async () => {
+  const tool = createSandboxedToolExecutor({
+    proxy,
+    module: new URL('./fixtures/never-resolves.mjs', import.meta.url),
+    exportName: 'neverResolves',
+    timeoutMs: 50,
+  })
+
+  await expect(tool.execute({})).rejects.toThrow('Sandboxed tool timed out after 50ms')
 })

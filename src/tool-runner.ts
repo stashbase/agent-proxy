@@ -28,6 +28,7 @@ const inheritedEnvironmentAllowList = [
 ]
 
 let linuxSandboxAvailable = false
+const forcedTerminationGraceMs = 1_000
 
 // Kept inline so both ESM and CommonJS package consumers can launch the same
 // worker without relying on a sibling asset path at runtime.
@@ -105,6 +106,7 @@ export function runSandboxedTool<Input, Output = unknown>(
   return new Promise<Output>((resolve, reject) => {
     let settled = false
     let stderr = ''
+    let forceKill: ReturnType<typeof setTimeout> | undefined
 
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()
@@ -117,13 +119,23 @@ export function runSandboxedTool<Input, Output = unknown>(
       callback()
     }
 
-    const timeout = setTimeout(() => {
+    const terminateChild = () => {
       child.kill('SIGTERM')
+      forceKill = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, forcedTerminationGraceMs)
+      forceKill.unref()
+    }
+
+    const timeout = setTimeout(() => {
+      terminateChild()
       finish(() => reject(new Error(`Sandboxed tool timed out after ${timeoutMs}ms`)))
     }, timeoutMs)
 
     child.once('error', (cause) => finish(() => reject(cause)))
     child.once('exit', (code, signal) => {
+      if (forceKill) clearTimeout(forceKill)
+
       if (!settled) {
         const detail = stderr.trim()
         const suffix = detail ? `: ${detail}` : ''
