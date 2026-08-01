@@ -154,7 +154,7 @@ For tool code the agent should not run in the trusted application process, creat
 ```ts
 import { tool } from '@openai/agents'
 import { z } from 'zod'
-import { createSandboxedToolExecutor, startLocalAgentProxy } from '@stashbase/agent-proxy'
+import { createSandboxedToolModule, startLocalAgentProxy } from '@stashbase/agent-proxy'
 
 const proxy = await startLocalAgentProxy({
   egressHosts: [],
@@ -169,12 +169,13 @@ const proxy = await startLocalAgentProxy({
   },
 })
 
-const githubWorker = createSandboxedToolExecutor({
+const github = createSandboxedToolModule({
   proxy,
   module: new URL('./tools/github.mjs', import.meta.url),
-  exportName: 'createIssue',
   sandbox: true,
 })
+
+const githubWorker = github.export('createIssue')
 
 const createGitHubIssue = tool({
   name: 'create_github_issue',
@@ -187,3 +188,18 @@ const createGitHubIssue = tool({
 `tools/github.mjs` receives `GITHUB_TOKEN=${STASHBASE_GITHUB_TOKEN}`, never the real token. It can use Node 20+ `fetch` (or a client that honors proxy configuration) to call `api.github.com`; the proxy replaces that exact placeholder only for the configured header and host.
 
 Each invocation starts a fresh Node worker with a minimal runtime environment, configured placeholders, and proxy/CA settings. `sandbox: true` additionally restricts network access to the local proxy, using the same approach as the CLI: `sandbox-exec` on macOS or a systemd user scope on Linux. It is opt-in and unavailable on Windows. Without it, a tool that bypasses proxy configuration can still make direct connections.
+
+For a module with several tools, configure its proxy and sandbox policy once, then expose only the exports that your application intends to register:
+
+```ts
+const github = createSandboxedToolModule({
+  proxy,
+  module: new URL('./tools/github.mjs', import.meta.url),
+  sandbox: true,
+})
+
+const listRepositories = github.export('listRepositories')
+const createIssue = github.export('createIssue')
+```
+
+Creating these executors does not create workers. Each `execute()` call still gets a fresh sandboxed process.

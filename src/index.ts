@@ -3,7 +3,11 @@ export {
   createOpenAIProxyFetch,
 } from "./openai-fetch";
 export { AgentProxy, startLocalAgentProxy } from "./proxy";
-export { createSandboxedToolExecutor, runSandboxedTool } from "./tool-runner";
+export {
+  createSandboxedToolExecutor,
+  createSandboxedToolModule,
+  runSandboxedTool,
+} from "./tool-runner";
 export type {
   AgentProxyBinding,
   AgentProxyError,
@@ -12,6 +16,8 @@ export type {
   LocalAgentProxy,
   SecretPlaceholder,
   SandboxedToolExecutor,
+  SandboxedToolModule,
+  SandboxedToolModuleOptions,
   SandboxedToolOptions,
   OpenAIClientConstructor,
   StartLocalAgentProxyOptions,

@@ -82,4 +82,15 @@ export type SandboxedToolOptions = {
 export type SandboxedToolExecutor = {
   execute<Input, Output = unknown>(input: Input): Promise<Output>
 }
+
+/** Shared worker configuration for several explicitly allowed exports of one module. */
+export type SandboxedToolModuleOptions = Omit<SandboxedToolOptions, 'exportName'>
+
+/**
+ * Creates per-export executors without repeating shared module and sandbox policy.
+ * Selecting an export remains explicit application-owned configuration.
+ */
+export type SandboxedToolModule = {
+  export(exportName: string): SandboxedToolExecutor
+}
 import type OpenAI from 'openai'

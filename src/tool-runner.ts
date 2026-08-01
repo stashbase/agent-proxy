@@ -1,5 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process'
-import type { LocalAgentProxy, SandboxedToolExecutor, SandboxedToolOptions } from './types'
+import type {
+  LocalAgentProxy,
+  SandboxedToolExecutor,
+  SandboxedToolModule,
+  SandboxedToolModuleOptions,
+  SandboxedToolOptions,
+} from './types'
 
 type WorkerReply = { ok: true; value: unknown } | { ok: false; message: string }
 
@@ -48,6 +54,26 @@ process.once('message', async (message) => {
 export function createSandboxedToolExecutor(options: SandboxedToolOptions): SandboxedToolExecutor {
   return {
     execute: (input) => runSandboxedTool(options, input),
+  }
+}
+
+/**
+ * Configures one sandboxed tool module and exposes explicitly selected exports.
+ * Each executor invocation still starts a fresh isolated worker process.
+ */
+export function createSandboxedToolModule(
+  options: SandboxedToolModuleOptions
+): SandboxedToolModule {
+  const moduleOptions = { ...options }
+
+  return {
+    export(exportName) {
+      if (!exportName.trim()) {
+        throw new Error('Sandboxed tool export name must not be empty')
+      }
+
+      return createSandboxedToolExecutor({ ...moduleOptions, exportName })
+    },
   }
 }
 
