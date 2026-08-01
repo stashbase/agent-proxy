@@ -64,9 +64,7 @@ export function createSandboxedToolExecutor(options: SandboxedToolOptions): Sand
  */
 export function createSandboxedToolModule<
   Exports extends object = Record<string, (...args: any[]) => unknown>,
->(
-  options: SandboxedToolModuleOptions
-): SandboxedToolModule<Exports> {
+>(options: SandboxedToolModuleOptions): SandboxedToolModule<Exports> {
   const moduleOptions = { ...options }
 
   return {
@@ -86,12 +84,18 @@ export function runSandboxedTool<Input, Output = unknown>(
   input: Input
 ): Promise<Output> {
   const module = normalizeModule(options.module)
+  const runtime = workerRuntime()
 
   if (options.sandbox === true && process.platform === 'linux') {
-    assertLinuxSandboxAvailable()
+    assertLinuxSandboxAvailable(runtime)
   }
 
-  const { command, args } = sandboxCommand(options.proxy, options.sandbox === true)
+  const { command, args } = sandboxCommand(
+    options.proxy,
+    options.sandbox === true,
+    process.platform,
+    runtime
+  )
   const child = spawn(command, [...args, '-e', workerProgram], {
     env: childEnvironment(options.proxy, options.env),
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
@@ -173,14 +177,27 @@ function childEnvironment(proxy: LocalAgentProxy, extra: Record<string, string> 
   return { ...safeRuntimeEnvironment, ...extra, ...proxy.childEnv }
 }
 
-function assertLinuxSandboxAvailable(): void {
+function workerRuntime(): string {
+  if (!process.versions.bun) return process.execPath
+
+  const runtime = process.env.STASHBASE_AGENT_PROXY_NODE ?? 'node'
+  const probe = spawnSync(runtime, ['--version'], { encoding: 'utf8', timeout: 5_000 })
+  if (probe.status === 0) return runtime
+
+  const detail = [probe.error?.message, probe.stderr?.trim()].filter(Boolean).join(': ')
+  throw new Error(
+    `Bun requires Node.js to run sandboxed tools${detail ? ` (${detail})` : ''}. ` +
+      'Install Node.js, add it to PATH, or set STASHBASE_AGENT_PROXY_NODE to its executable path.'
+  )
+}
+
+function assertLinuxSandboxAvailable(runtime: string): void {
   if (linuxSandboxAvailable) return
 
-  const probe = spawnSync(
-    'systemd-run',
-    ['--user', '--scope', '--quiet', process.execPath, '-e', ''],
-    { encoding: 'utf8', timeout: 5_000 }
-  )
+  const probe = spawnSync('systemd-run', ['--user', '--scope', '--quiet', runtime, '-e', ''], {
+    encoding: 'utf8',
+    timeout: 5_000,
+  })
 
   if (probe.status === 0) {
     linuxSandboxAvailable = true
@@ -197,9 +214,10 @@ function assertLinuxSandboxAvailable(): void {
 export function sandboxCommand(
   proxy: LocalAgentProxy,
   sandbox: boolean,
-  platform = process.platform
+  platform = process.platform,
+  runtime = process.execPath
 ): { command: string; args: string[] } {
-  if (!sandbox) return { command: process.execPath, args: [] }
+  if (!sandbox) return { command: runtime, args: [] }
 
   const proxyUrl = new URL(proxy.url)
   if (proxyUrl.hostname !== '127.0.0.1' || !proxyUrl.port) {
@@ -214,7 +232,7 @@ export function sandboxCommand(
       (deny network-outbound)
       (allow network-outbound (remote ip "localhost:${proxyUrl.port}"))
     `
-    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, process.execPath] }
+    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, runtime] }
   }
 
   if (platform === 'linux') {
@@ -228,7 +246,7 @@ export function sandboxCommand(
         '--property=IPAddressAllow=127.0.0.1',
         '--property=IPAddressAllow=::1',
         '--',
-        process.execPath,
+        runtime,
       ],
     }
   }

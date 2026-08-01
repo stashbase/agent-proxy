@@ -14,6 +14,12 @@ it('uses the appropriate sandbox launcher for supported platforms', () => {
   expect(sandboxCommand(proxy, true, 'linux')).toMatchObject({ command: 'systemd-run' })
 })
 
+it('uses the selected Node runtime in sandbox launch commands', () => {
+  const runtime = '/opt/node/bin/node'
+  expect(sandboxCommand(proxy, true, 'darwin', runtime).args).toContain(runtime)
+  expect(sandboxCommand(proxy, true, 'linux', runtime).args).toContain(runtime)
+})
+
 it('rejects sandboxing on unsupported platforms', () => {
   expect(() => sandboxCommand(proxy, true, 'win32')).toThrow('currently supported')
 })

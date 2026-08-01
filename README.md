@@ -108,8 +108,11 @@ returning sensitive data that it fetched with an authorized credential.
 
 ## Platform support
 
-The proxy and placeholder-only worker run on Node.js 20+ platforms. The optional
-`sandbox: true` network restriction has narrower operating-system support:
+The proxy and placeholder-only worker run on Node.js 20+ platforms. Bun can
+launch the trusted application, but sandboxed workers run under Node.js so proxy
+and CA environment settings are enforced. Install Node.js or set
+`STASHBASE_AGENT_PROXY_NODE` to its executable path. The optional `sandbox: true`
+network restriction has narrower operating-system support:
 
 - **macOS:** supported with the system `sandbox-exec` utility.
 
