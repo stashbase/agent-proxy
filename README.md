@@ -106,6 +106,27 @@ credential in the request header. Agent Proxy prevents the credential from
 being handed to agent code and model context; it does not prevent a tool from
 returning sensitive data that it fetched with an authorized credential.
 
+## Observability hooks
+
+Pass metadata-only lifecycle hooks in the proxy policy to record tracing,
+metrics, or audit events. Hook contexts contain destination host, port, method,
+binding name, status, and duration as applicable—never bodies, header values,
+placeholders, or secret values. Hooks are observational: failures are ignored
+so they cannot alter proxy policy or interrupt tool traffic.
+
+```ts
+const proxy = new AgentProxy({
+  egressHosts: ['api.openai.com'],
+  bindings: { /* ... */ },
+  hooks: {
+    beforeRequest: (event) => metrics.increment('agent_proxy.request', { host: event.host }),
+    afterResponse: (event) => metrics.timing('agent_proxy.duration', event.durationMs),
+    onDenied: (event) => audit.warn('agent_proxy.denied', event),
+    onError: (event) => audit.error('agent_proxy.error', event),
+  },
+})
+```
+
 ## Platform support
 
 The proxy and placeholder-only worker run on Node.js 20+ platforms. Bun can

@@ -113,6 +113,75 @@ async function withLocalOpenAI(
 }
 
 describe('local agent proxy policy', () => {
+  it('emits metadata-only lifecycle hooks without changing proxy behavior', async () => {
+    const events: Array<Record<string, unknown>> = []
+    const proxy = await startLocalAgentProxy({
+      egressHosts: ['api.openai.com'],
+      bindings: {
+        OPENAI_API_KEY: {
+          secret: 'real-secret-value',
+          hosts: ['api.openai.com'],
+        },
+      },
+      hooks: {
+        beforeRequest: (event) => {
+          events.push({ type: 'before', ...event })
+        },
+        afterResponse: (event) => {
+          events.push({ type: 'after', ...event })
+        },
+        onDenied: (event) => {
+          events.push({ type: 'denied', ...event })
+        },
+      },
+    })
+    proxies.push(proxy)
+
+    await withLocalOpenAI(
+      (request, response) => {
+        request.resume()
+        response.end('ok')
+      },
+      async () => {
+        await throughTls(
+          proxy,
+          `GET /v1/models HTTP/1.1\r\nHost: api.openai.com\r\nAuthorization: Bearer ${proxy.placeholders.OPENAI_API_KEY}\r\nConnection: close\r\n\r\n`
+        )
+      }
+    )
+
+    const { port } = new URL(proxy.url)
+    await new Promise<void>((resolve) => {
+      const socket = connect(Number(port), '127.0.0.1', () =>
+        socket.write('CONNECT example.com:443 HTTP/1.1\r\n\r\n')
+      )
+      socket.once('data', () => resolve())
+    })
+
+    expect(events).toContainEqual({
+      type: 'before',
+      host: 'api.openai.com',
+      port: 443,
+      method: 'GET',
+      binding: 'OPENAI_API_KEY',
+    })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'after',
+        host: 'api.openai.com',
+        status: 200,
+        binding: 'OPENAI_API_KEY',
+      })
+    )
+    expect(events).toContainEqual({
+      type: 'denied',
+      host: 'example.com',
+      port: 443,
+      code: 'proxy.host_denied',
+    })
+    expect(JSON.stringify(events)).not.toContain('real-secret-value')
+  })
+
   it('honors an aborted custom fetch request', async () => {
     const proxy = await start()
     const controller = new AbortController()

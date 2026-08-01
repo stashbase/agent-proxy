@@ -24,12 +24,46 @@ export type AgentProxyBinding = {
   env?: string
 }
 
+/** Metadata-only lifecycle events. Hook contexts never contain bodies, header values, or secrets. */
+export type AgentProxyBeforeRequestHookContext = {
+  host: string
+  port: number
+  method: string
+  binding?: string
+}
+
+export type AgentProxyAfterResponseHookContext = AgentProxyBeforeRequestHookContext & {
+  status: number
+  durationMs: number
+}
+
+export type AgentProxyErrorHookContext = AgentProxyBeforeRequestHookContext & {
+  error: unknown
+  durationMs: number
+}
+
+export type AgentProxyDeniedHookContext = {
+  host?: string
+  port?: number
+  code: AgentProxyErrorCode
+}
+
+/** Read-only observability hooks. Hook failures never alter proxy policy or traffic. */
+export type AgentProxyHooks = {
+  beforeRequest?: (context: AgentProxyBeforeRequestHookContext) => void | Promise<void>
+  afterResponse?: (context: AgentProxyAfterResponseHookContext) => void | Promise<void>
+  onError?: (context: AgentProxyErrorHookContext) => void | Promise<void>
+  onDenied?: (context: AgentProxyDeniedHookContext) => void | Promise<void>
+}
+
 export type StartLocalAgentProxyOptions = {
   egressHosts: string[]
 
   denyHosts?: string[]
 
   bindings: Record<string, AgentProxyBinding>
+
+  hooks?: AgentProxyHooks
 }
 
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
@@ -98,17 +132,23 @@ export type SandboxedToolExportName<Exports extends object> = Extract<
   string
 >
 
-export type SandboxedToolExportInput<Exports extends object, Name extends keyof Exports> =
-  Exports[Name] extends (input: infer Input, ...args: any[]) => unknown ? Input : never
+export type SandboxedToolExportInput<
+  Exports extends object,
+  Name extends keyof Exports,
+> = Exports[Name] extends (input: infer Input, ...args: any[]) => unknown ? Input : never
 
-export type SandboxedToolExportOutput<Exports extends object, Name extends keyof Exports> =
-  Exports[Name] extends (...args: any[]) => infer Output ? Awaited<Output> : never
+export type SandboxedToolExportOutput<
+  Exports extends object,
+  Name extends keyof Exports,
+> = Exports[Name] extends (...args: any[]) => infer Output ? Awaited<Output> : never
 
 /**
  * Creates per-export executors without repeating shared module and sandbox policy.
  * Selecting an export remains explicit application-owned configuration.
  */
-export type SandboxedToolModule<Exports extends object = Record<string, (...args: any[]) => unknown>> = {
+export type SandboxedToolModule<
+  Exports extends object = Record<string, (...args: any[]) => unknown>,
+> = {
   export<Name extends SandboxedToolExportName<Exports>>(
     exportName: Name
   ): TypedSandboxedToolExecutor<

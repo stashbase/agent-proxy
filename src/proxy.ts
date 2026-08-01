@@ -11,6 +11,7 @@ import { createCertificateAuthority } from './certificates'
 import { createOpenAIProxyClient } from './openai-fetch'
 import type {
   AgentProxyBinding,
+  AgentProxyBeforeRequestHookContext,
   AgentProxyError,
   AgentProxyErrorCode,
   CreateOpenAIProxyClientOptions,
@@ -54,6 +55,18 @@ function writeError(
   response.end(
     `HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`
   )
+}
+
+function invokeHook<Context>(
+  hook: ((context: Context) => void | Promise<void>) | undefined,
+  context: Context
+): void {
+  if (!hook) return
+
+  // Observability must never weaken or block deterministic policy enforcement.
+  void Promise.resolve()
+    .then(() => hook(Object.freeze({ ...context })))
+    .catch(() => {})
 }
 
 function matchesHost(host: string, patterns: string[]): boolean {
@@ -168,8 +181,8 @@ async function startLocalAgentProxyInternal<
   const sockets = new Set<Socket>()
   let stopped = false
 
-  const server = createHttpServer((request, response) =>
-    handlePlainRequest(request, response, resolvedOptions)
+  const server = createHttpServer(
+    (request, response) => void handlePlainRequest(request, response, resolvedOptions)
   )
   server.on('connection', (socket) => {
     sockets.add(socket)
@@ -183,6 +196,12 @@ async function startLocalAgentProxyInternal<
       isDenied(target.host, resolvedOptions) ||
       !canInspect(target.host, resolvedOptions)
     ) {
+      invokeHook(
+        resolvedOptions.hooks?.onDenied,
+        target
+          ? { host: target.host, port: target.port, code: 'proxy.host_denied' }
+          : { code: 'proxy.host_denied' }
+      )
       return writeError(socket, 'proxy.host_denied')
     }
 
@@ -342,18 +361,34 @@ function handleTlsRequest(
   placeholders: Record<string, string>
 ): void {
   const server = createHttpServer((request, response) => {
-    if (isDenied(host, options)) return writeError(response, 'proxy.host_denied')
+    const startedAt = performance.now()
+    if (isDenied(host, options)) {
+      invokeHook(options.hooks?.onDenied, { host, port, code: 'proxy.host_denied' })
+      return writeError(response, 'proxy.host_denied')
+    }
 
     const credential = injectCredential(request, host, options, placeholders)
-    if (credential) return writeError(response, credential)
+    if (credential.code) {
+      invokeHook(options.hooks?.onDenied, { host, port, code: credential.code })
+      return writeError(response, credential.code)
+    }
 
     if (
       !isEgressAllowed(host, options) &&
       !hasAuthorizedCredential(request, host, options, placeholders)
-    )
+    ) {
+      invokeHook(options.hooks?.onDenied, { host, port, code: 'proxy.host_denied' })
       return writeError(response, 'proxy.host_denied')
+    }
 
-    forwardHttps(request, response, host, port)
+    const context: AgentProxyBeforeRequestHookContext = {
+      host,
+      port,
+      method: request.method ?? 'GET',
+      binding: credential.binding,
+    }
+    invokeHook(options.hooks?.beforeRequest, context)
+    forwardHttps(request, response, host, port, context, startedAt, options)
   })
   server.emit('connection', socket)
 }
@@ -363,7 +398,7 @@ function injectCredential(
   host: string,
   options: ResolvedOptions,
   placeholders: Record<string, string>
-): AgentProxyErrorCode | undefined {
+): { code?: AgentProxyErrorCode; binding?: string } {
   for (const [name, placeholder] of Object.entries(placeholders)) {
     const binding = options.bindings[name]
     const header = binding.header.toLowerCase()
@@ -373,20 +408,20 @@ function injectCredential(
     if (value !== expected) continue
 
     if (isDenied(host, options) || !matchesHost(host, binding.hosts)) {
-      return 'proxy.credential_host_denied'
+      return { code: 'proxy.credential_host_denied' }
     }
 
     request.headers[header] = binding.valueTemplate.replace('{secret}', binding.secret)
-    return undefined
+    return { binding: name }
   }
 
   for (const value of Object.values(request.headers)) {
     if (typeof value === 'string' && value.includes('${STASHBASE_')) {
-      return 'proxy.unknown_placeholder'
+      return { code: 'proxy.unknown_placeholder' }
     }
   }
 
-  return undefined
+  return {}
 }
 
 function hasAuthorizedCredential(
@@ -436,7 +471,10 @@ function forwardHttps(
   request: IncomingMessage,
   response: ServerResponse,
   host: string,
-  port: number
+  port: number,
+  context: AgentProxyBeforeRequestHookContext,
+  startedAt: number,
+  options: ResolvedOptions
 ): void {
   const authority = port === 443 ? host : `${host}:${port}`
 
@@ -455,11 +493,21 @@ function forwardHttps(
         upstreamResponse.statusMessage,
         upstreamResponse.headers
       )
+      invokeHook(options.hooks?.afterResponse, {
+        ...context,
+        status: upstreamResponse.statusCode ?? 502,
+        durationMs: Math.round(performance.now() - startedAt),
+      })
       upstreamResponse.pipe(response)
     }
   )
 
-  upstream.on('error', () => {
+  upstream.on('error', (cause) => {
+    invokeHook(options.hooks?.onError, {
+      ...context,
+      error: cause,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
     if (!response.headersSent) {
       response.writeHead(502, { connection: 'close' })
     }
