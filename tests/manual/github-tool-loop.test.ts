@@ -16,6 +16,14 @@ const runLiveTest =
   Boolean(process.env.OPENAI_API_KEY) &&
   Boolean(process.env.GITHUB_TOKEN)
 
+// To run this test, set the following environment variables and run the test command:
+// RUN_AGENT_PROXY_GITHUB_TOOL_TEST=1 \
+// OPENAI_API_KEY=... \
+// GITHUB_TOKEN=... \
+// OPENAI_BASE_URL=... \
+// OPENAI_MODEL=... \
+// bun run test -- tests/manual/github-tool-loop.test.ts
+
 it.skipIf(!runLiveTest)(
   'asks a model to list GitHub repositories through a sandboxed tool',
   async () => {
