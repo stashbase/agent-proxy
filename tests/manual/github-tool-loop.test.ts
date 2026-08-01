@@ -120,7 +120,10 @@ it.skipIf(!runLiveTest)(
       ],
     })
 
-    expect(finalResponse.choices[0]?.message.content).not.toBe('')
+    const messageContent = finalResponse.choices[0]?.message.content
+    console.log(messageContent)
+
+    expect(messageContent).not.toBe('')
   },
   90_000
 )
