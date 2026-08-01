@@ -1,6 +1,6 @@
 # @stashbase/agent-proxy
 
-Experimental Node.js 20+ local Agent Proxy. It exposes placeholders to an agent harness and injects credentials only where a configured policy permits it, over a temporary locally trusted TLS interception connection. The trusted application resolves each secret (for example, with the main Stashbase SDK) before creating its binding.
+Node.js 20+ local Agent Proxy. It exposes placeholders to an agent harness and injects credentials only where a configured policy permits it, over a temporary locally trusted TLS interception connection. The trusted application resolves each secret (for example, with the main Stashbase SDK) before creating its binding.
 
 **A focused harness-level security primitive for agent tools:** let an agent use
 GitHub, Stripe, or an internal API without handing its real credential to the
