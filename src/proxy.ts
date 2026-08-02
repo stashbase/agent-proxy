@@ -10,6 +10,7 @@ import { createSecureContext, TLSSocket } from 'node:tls'
 import { createCertificateAuthority } from './certificates'
 import { createAnthropicProxyClient } from './anthropic'
 import { createOpenAIProxyClient } from './openai-fetch'
+import { createVercelAIProxyFetch } from './vercel-ai'
 import type {
   AgentProxyBinding,
   AgentProxyBeforeRequestHookContext,
@@ -313,6 +314,14 @@ export class AgentProxy<
    */
   createAnthropicClient<Client extends FetchConfigurableClient<Client>>(anthropic: Client): Client {
     return createAnthropicProxyClient(anthropic, { proxy: this })
+  }
+
+  /**
+   * Creates a fetch implementation to pass to a Vercel AI SDK provider's
+   * constructor. Providers capture fetch when they are created.
+   */
+  createVercelAIFetch(): typeof fetch {
+    return createVercelAIProxyFetch(this)
   }
 
   async start(): Promise<this> {

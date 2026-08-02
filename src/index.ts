@@ -1,5 +1,6 @@
 export { createAnthropicProxyClient } from './anthropic'
 export { createOpenAIProxyClient, createOpenAIProxyFetch } from './openai-fetch'
+export { createVercelAIProxyFetch } from './vercel-ai'
 export { AgentProxy, startLocalAgentProxy } from './proxy'
 export {
   createSandboxedToolExecutor,

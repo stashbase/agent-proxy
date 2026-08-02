@@ -107,6 +107,43 @@ Use a credential binding instead when Anthropic credentials must be available
 to an agent tool. The trusted application still chooses the binding name,
 header, and permitted hosts.
 
+## Use with Vercel AI SDK
+
+Pass the proxy fetch implementation while creating an AI SDK provider. This
+works in ordinary Node applications and on any host; Vercel deployment is not
+required. AI SDK providers capture `fetch` at creation time, so create the
+provider with the proxy fetch rather than attempting to wrap it afterwards.
+
+```ts
+import { generateText } from 'ai'
+import { createOpenAI } from '@ai-sdk/openai'
+import { AgentProxy } from '@stashbase/agent-proxy'
+
+const proxy = new AgentProxy({
+  egressHosts: ['api.openai.com'],
+  bindings: {},
+})
+
+await proxy.start()
+
+const openai = createOpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+  fetch: proxy.createVercelAIFetch(),
+})
+
+try {
+  const result = await generateText({
+    model: openai('gpt-5'),
+    prompt: 'Hello',
+  })
+} finally {
+  await proxy.stop()
+}
+```
+
+The same `fetch` value can be passed to other AI SDK provider factories that
+support a custom `fetch`, including the Anthropic provider.
+
 ## Why use it
 
 Agent frameworks, tool workers, logs, and model-provider requests often cross
