@@ -12,9 +12,9 @@ It is designed to fit an existing Node application and secret store. You do not
 need a separate agent runtime, remote sandbox service, or a replacement for your
 current framework.
 
-Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. Use `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` with the official OpenAI SDK. The `egressHosts`, `denyHosts`, and `bindings` policy matches CLI agent profile semantics. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
+Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. The `egressHosts`, `denyHosts`, and `bindings` policy matches CLI agent profile semantics. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
 
-This reduces accidental secret disclosure; it is not a malicious-process sandbox. The OpenAI client is the first dedicated SDK adapter; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
+This reduces accidental secret disclosure; it is not a malicious-process sandbox. OpenAI and Anthropic clients have dedicated SDK adapters; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
 ## Use with the Stashbase Node SDK
 
@@ -68,6 +68,45 @@ The dependency direction is intentional: the application owns Stashbase SDK
 authentication and secret resolution; Agent Proxy owns the short-lived local
 credential boundary. This package never imports or requires the Node SDK.
 
+## Use with the Anthropic SDK
+
+Pass an existing, application-configured Anthropic client to the proxy. This
+preserves the client's API key, base URL, retries, and all other SDK options;
+only its HTTPS transport changes. Agent Proxy does not assume an
+`ANTHROPIC_API_KEY` binding.
+
+```ts
+import Anthropic from '@anthropic-ai/sdk'
+import { AgentProxy } from '@stashbase/agent-proxy'
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+})
+
+const proxy = new AgentProxy({
+  egressHosts: [new URL(anthropic.baseURL).hostname],
+  bindings: {},
+})
+
+await proxy.start()
+
+const anthropicClient = proxy.createAnthropicClient(anthropic)
+
+try {
+  const message = await anthropicClient.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 100,
+    messages: [{ role: 'user', content: 'Hello' }],
+  })
+} finally {
+  await proxy.stop()
+}
+```
+
+Use a credential binding instead when Anthropic credentials must be available
+to an agent tool. The trusted application still chooses the binding name,
+header, and permitted hosts.
+
 ## Why use it
 
 Agent frameworks, tool workers, logs, and model-provider requests often cross
@@ -89,10 +128,10 @@ only at the final outbound request. This provides several practical benefits:
   to an arbitrary host. `egressHosts` and `denyHosts` provide a separate
   destination allowlist for requests that do not need a credential.
 
-- **Works with familiar application code.** The OpenAI adapter lets a trusted
-  Node application use the official SDK while routing transport through the
-  local policy. Worker-backed tools can use standard proxy-aware HTTPS clients
-  or Node `fetch` without receiving the resolved secret.
+- **Works with familiar application code.** The OpenAI and Anthropic adapters
+  let a trusted Node application use the official SDK while routing transport
+  through the local policy. Worker-backed tools can use standard proxy-aware
+  HTTPS clients or Node `fetch` without receiving the resolved secret.
 
 - **Reduces environment leakage.** Each tool invocation starts with a fresh,
   minimal environment. It receives only configured placeholders and proxy/CA
@@ -119,7 +158,9 @@ so they cannot alter proxy policy or interrupt tool traffic.
 ```ts
 const proxy = new AgentProxy({
   egressHosts: ['api.openai.com'],
-  bindings: { /* ... */ },
+  bindings: {
+    // ...
+  },
   hooks: {
     beforeRequest: (event) => metrics.increment('agent_proxy.request', { host: event.host }),
     afterResponse: (event) => metrics.timing('agent_proxy.duration', event.durationMs),

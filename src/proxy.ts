@@ -8,13 +8,16 @@ import { request as httpsRequest } from 'node:https'
 import type { Socket } from 'node:net'
 import { createSecureContext, TLSSocket } from 'node:tls'
 import { createCertificateAuthority } from './certificates'
+import { createAnthropicProxyClient } from './anthropic'
 import { createOpenAIProxyClient } from './openai-fetch'
 import type {
   AgentProxyBinding,
   AgentProxyBeforeRequestHookContext,
   AgentProxyError,
   AgentProxyErrorCode,
+  CreateAnthropicProxyClientOptions,
   CreateOpenAIProxyClientOptions,
+  FetchConfigurableClient,
   LocalAgentProxy,
   OpenAIClientConstructor,
   StartLocalAgentProxyOptions,
@@ -302,6 +305,14 @@ export class AgentProxy<
     options: Omit<CreateOpenAIProxyClientOptions, 'proxy'> = {}
   ): OpenAI {
     return createOpenAIProxyClient(openai, { ...options, proxy: this })
+  }
+
+  /**
+   * Wraps an existing Anthropic client so its HTTPS transport uses this proxy.
+   * The existing client remains application-owned, including its API key and base URL.
+   */
+  createAnthropicClient<Client extends FetchConfigurableClient<Client>>(anthropic: Client): Client {
+    return createAnthropicProxyClient(anthropic, { proxy: this })
   }
 
   async start(): Promise<this> {

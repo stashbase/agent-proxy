@@ -90,6 +90,16 @@ export type CreateOpenAIProxyClientOptions = {
   apiKeyBinding?: string
 }
 
+/** The portion of an official Anthropic client used by Agent Proxy. */
+export type FetchConfigurableClient<Client> = {
+  withOptions(options: { fetch: typeof fetch }): Client
+}
+
+/** Options for wrapping an existing official Anthropic client. */
+export type CreateAnthropicProxyClientOptions = {
+  proxy: LocalAgentProxy
+}
+
 /** Configuration for an isolated Node worker that implements an agent tool. */
 export type SandboxedToolOptions = {
   proxy: LocalAgentProxy

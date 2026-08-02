@@ -1,3 +1,4 @@
+export { createAnthropicProxyClient } from './anthropic'
 export { createOpenAIProxyClient, createOpenAIProxyFetch } from './openai-fetch'
 export { AgentProxy, startLocalAgentProxy } from './proxy'
 export {
@@ -14,7 +15,9 @@ export type {
   AgentProxyErrorCode,
   AgentProxyErrorHookContext,
   AgentProxyHooks,
+  CreateAnthropicProxyClientOptions,
   CreateOpenAIProxyClientOptions,
+  FetchConfigurableClient,
   LocalAgentProxy,
   SecretPlaceholder,
   SandboxedToolExecutor,
