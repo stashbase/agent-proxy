@@ -41,7 +41,8 @@ try {
   // Give proxy.childEnv to the agent or tool process. It contains only
   // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
 } finally {
-  await proxy.stop()
+  const stopped = await proxy.stop()
+  if (!stopped.ok) console.error(stopped.error)
 }
 ```
 
