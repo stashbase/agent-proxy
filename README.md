@@ -12,7 +12,36 @@ It is designed to fit an existing Node application and secret store. You do not
 need a separate agent runtime, remote sandbox service, or a replacement for your
 current framework.
 
-Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. The `egressHosts`, `denyHosts`, and `bindings` policy matches CLI agent profile semantics. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
+Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
+
+## Remote Agent Proxy
+
+`RemoteAgentProxy` creates a short-lived, control-plane-backed session. The
+trusted application supplies its Stashbase API key; the agent receives only
+placeholders and a localhost proxy URL. The session token and resolved secret
+values stay in the parent process and are revoked when `stop()` completes.
+
+```ts
+import { RemoteAgentProxy } from '@stashbase/agent-proxy'
+
+const proxy = new RemoteAgentProxy({
+  apiKey: process.env.STASHBASE_API_KEY!,
+  project: 'platform',
+  environment: 'development',
+  egressHosts: ['api.openai.com'],
+  bindings: {
+    OPENAI_API_KEY: { from: 'OPENAI_API_KEY', env: 'OPENAI_API_KEY', hosts: ['api.openai.com'] },
+  },
+})
+
+await proxy.start()
+try {
+  // Give proxy.childEnv to the agent or tool process. It contains only
+  // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
+} finally {
+  await proxy.stop()
+}
+```
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. OpenAI and Anthropic clients have dedicated SDK adapters; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
@@ -291,7 +320,7 @@ const createGitHubIssue = tool({
 
 `tools/github.mjs` receives `GITHUB_TOKEN=${STASHBASE_GITHUB_TOKEN}`, never the real token. It can use Node 20+ `fetch` (or a client that honors proxy configuration) to call `api.github.com`; the proxy replaces that exact placeholder only for the configured header and host.
 
-Each invocation starts a fresh Node worker with a minimal runtime environment, configured placeholders, and proxy/CA settings. `sandbox: true` additionally restricts network access to the local proxy, using the same approach as the CLI: `sandbox-exec` on macOS or a systemd user scope on Linux. It is opt-in and unavailable on Windows. Without it, a tool that bypasses proxy configuration can still make direct connections.
+Each invocation starts a fresh Node worker with a minimal runtime environment, configured placeholders, and proxy/CA settings. `sandbox: true` additionally restricts network access to the local proxy using `sandbox-exec` on macOS or a systemd user scope on Linux. It is opt-in and unavailable on Windows. Without it, a tool that bypasses proxy configuration can still make direct connections.
 
 For a module with several tools, configure its proxy and sandbox policy once, then expose only the exports that your application intends to register:
 
