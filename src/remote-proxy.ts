@@ -221,7 +221,18 @@ async function requestSession(
       })),
     }),
   })
-  if (!response.ok) throw new Error(`Remote Agent Proxy session request failed (${response.status})`)
+  if (!response.ok) {
+    const body = await response.text()
+    let detail = body
+    try {
+      detail = JSON.stringify(JSON.parse(body))
+    } catch {
+      // Some gateways return plain text or an empty error response.
+    }
+    throw new Error(
+      `Remote Agent Proxy session request failed (${response.status})${detail ? `: ${detail}` : ''}`
+    )
+  }
   const session = (await response.json()) as RemoteSession
   if (!session.session_token || !session.proxy_url || session.protocol !== 'http/1.1-forward-proxy-tls-intercept' || !session.proxy_ca?.pem) {
     throw new Error('Remote Agent Proxy returned an unsupported session')
