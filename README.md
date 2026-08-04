@@ -34,7 +34,9 @@ const proxy = new RemoteAgentProxy({
   },
 })
 
-await proxy.start()
+const started = await proxy.start()
+if (!started.ok) throw new Error(started.error.message)
+
 try {
   // Give proxy.childEnv to the agent or tool process. It contains only
   // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
