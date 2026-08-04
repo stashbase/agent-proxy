@@ -33,5 +33,7 @@ export type {
   OpenAIClientConstructor,
   RemoteAgentProxyBinding,
   RemoteAgentProxyOptions,
+  RemoteAgentProxyStartError,
+  RemoteAgentProxyStartResult,
   StartLocalAgentProxyOptions,
 } from './types'

@@ -23,6 +23,8 @@ import type {
   OpenAIClientConstructor,
   RemoteAgentProxyBinding,
   RemoteAgentProxyOptions,
+  RemoteAgentProxyStartError,
+  RemoteAgentProxyStartResult,
 } from './types'
 
 type RemoteSession = {
@@ -42,6 +44,17 @@ type ResolvedBinding = RemoteAgentProxyBinding & {
 }
 
 type ActiveRemoteProxy<Names extends string> = LocalAgentProxy<Names>
+
+class RemoteProxyStartupError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number | null = null,
+    readonly details?: unknown
+  ) {
+    super(message)
+  }
+}
 
 function resolveBindings(
   bindings: Record<string, RemoteAgentProxyBinding>
@@ -223,23 +236,39 @@ async function requestSession(
   })
   if (!response.ok) {
     const body = await response.text()
-    let detail = body
+    let details: unknown = body || undefined
+    let message = `Remote Agent Proxy session request failed (${response.status})`
+    let code = 'remote.session_request_failed'
     try {
-      detail = JSON.stringify(JSON.parse(body))
+      const parsed = JSON.parse(body) as { error?: { code?: string; message?: string; details?: unknown } }
+      details = parsed
+      if (parsed.error?.code) code = parsed.error.code
+      if (parsed.error?.message) message = parsed.error.message
     } catch {
       // Some gateways return plain text or an empty error response.
     }
-    throw new Error(
-      `Remote Agent Proxy session request failed (${response.status})${detail ? `: ${detail}` : ''}`
-    )
+    throw new RemoteProxyStartupError(code, message, response.status, details)
   }
   const session = (await response.json()) as RemoteSession
   if (!session.session_token || !session.proxy_url || session.protocol !== 'http/1.1-forward-proxy-tls-intercept' || !session.proxy_ca?.pem) {
-    throw new Error('Remote Agent Proxy returned an unsupported session')
+    throw new RemoteProxyStartupError(
+      'remote.session_invalid',
+      'Remote Agent Proxy returned an unsupported session'
+    )
   }
   const digest = createHash('sha256').update(session.proxy_ca.pem).digest('hex')
-  if (digest !== session.proxy_ca.sha256.toLowerCase()) throw new Error('Remote Agent Proxy returned a CA with an invalid SHA-256 digest')
-  if (!Number.isFinite(Date.parse(session.expires_at))) throw new Error('Remote Agent Proxy returned an invalid expiry')
+  if (digest !== session.proxy_ca.sha256.toLowerCase()) {
+    throw new RemoteProxyStartupError(
+      'remote.session_invalid',
+      'Remote Agent Proxy returned a CA with an invalid SHA-256 digest'
+    )
+  }
+  if (!Number.isFinite(Date.parse(session.expires_at))) {
+    throw new RemoteProxyStartupError(
+      'remote.session_invalid',
+      'Remote Agent Proxy returned an invalid expiry'
+    )
+  }
   return session
 }
 
@@ -380,21 +409,37 @@ export class RemoteAgentProxy<
   createVercelAIFetch(): typeof fetch {
     return createVercelAIProxyFetch(this)
   }
-  async start(): Promise<this> {
-    if (this.#current) return this
-    if (!this.#starting)
+  /** Starts the session and returns a Node SDK-style success or failure result. */
+  async start(): Promise<RemoteAgentProxyStartResult<this>> {
+    if (this.#current) return { ok: true, data: this, error: null, status: null }
+    if (!this.#starting) {
       this.#starting = createRemoteProxy(this.options).then((proxy) => {
         this.#current = proxy
         this.#last = proxy
         return proxy
       })
+    }
     const starting = this.#starting
     try {
       await starting
+      return { ok: true, data: this, error: null, status: null }
+    } catch (error) {
+      const failure = remoteStartError(error)
+      return { ok: false, data: null, error: failure.error, status: failure.status }
     } finally {
       if (this.#starting === starting) this.#starting = undefined
     }
-    return this
+  }
+  /** Starts the session and throws if startup fails. */
+  async startOrThrow(): Promise<this> {
+    const result = await this.start()
+    if (result.ok) return result.data
+    throw new RemoteProxyStartupError(
+      result.error.code,
+      result.error.message,
+      result.status,
+      result.error.details
+    )
   }
   async stop(): Promise<void> {
     if (this.#starting) await this.#starting
@@ -417,6 +462,22 @@ export async function startRemoteAgentProxy<
   const Bindings extends Record<string, RemoteAgentProxyBinding>,
 >(
   options: Omit<RemoteAgentProxyOptions, 'bindings'> & { bindings: Bindings }
-): Promise<RemoteAgentProxy<Bindings>> {
+): Promise<RemoteAgentProxyStartResult<RemoteAgentProxy<Bindings>>> {
   return new RemoteAgentProxy(options).start()
+}
+
+function remoteStartError(error: unknown): { error: RemoteAgentProxyStartError; status: number | null } {
+  if (error instanceof RemoteProxyStartupError) {
+    return {
+      error: { code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }) },
+      status: error.status,
+    }
+  }
+  return {
+    error: {
+      code: 'remote.start_failed',
+      message: error instanceof Error ? error.message : 'Remote Agent Proxy failed to start',
+    },
+    status: null,
+  }
 }

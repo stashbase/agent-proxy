@@ -95,6 +95,18 @@ export type RemoteAgentProxyOptions = {
   apiUrl?: string
 }
 
+/** A structured failure returned while starting a Remote Agent Proxy session. */
+export type RemoteAgentProxyStartError = {
+  code: string
+  message: string
+  details?: unknown
+}
+
+/** Node SDK-style outcome returned by {@link RemoteAgentProxy.start}. */
+export type RemoteAgentProxyStartResult<Proxy> =
+  | { ok: true; data: Proxy; error: null; status: number | null }
+  | { ok: false; data: null; error: RemoteAgentProxyStartError; status: number | null }
+
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
 
 export type LocalAgentProxy<Names extends string = never> = {
