@@ -1,5 +1,7 @@
 # @stashbase/agent-proxy
 
+## Local Agent Proxy
+
 Node.js 20+ local Agent Proxy. It exposes placeholders to an agent harness and injects credentials only where a configured policy permits it, over a temporary locally trusted TLS interception connection. The trusted application resolves each secret (for example, with the main Stashbase SDK) before creating its binding.
 
 **A focused harness-level security primitive for agent tools:** let an agent use
@@ -14,41 +16,9 @@ current framework.
 
 Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
 
-## Remote Agent Proxy
-
-`RemoteAgentProxy` creates a short-lived, control-plane-backed session. The
-trusted application supplies its Stashbase API key; the agent receives only
-placeholders and a localhost proxy URL. The session token and resolved secret
-values stay in the parent process and are revoked when `stop()` completes.
-
-```ts
-import { RemoteAgentProxy } from '@stashbase/agent-proxy'
-
-const proxy = new RemoteAgentProxy({
-  apiKey: process.env.STASHBASE_API_KEY!,
-  project: 'platform',
-  environment: 'development',
-  egressHosts: ['api.openai.com'],
-  bindings: {
-    OPENAI_API_KEY: { from: 'OPENAI_API_KEY', env: 'OPENAI_API_KEY', hosts: ['api.openai.com'] },
-  },
-})
-
-const started = await proxy.start()
-if (!started.ok) throw new Error(started.error.message)
-
-try {
-  // Give proxy.childEnv to the agent or tool process. It contains only
-  // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
-} finally {
-  const stopped = await proxy.stop()
-  if (!stopped.ok) console.error(stopped.error)
-}
-```
-
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. OpenAI and Anthropic clients have dedicated SDK adapters; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
-## Use with the Stashbase Node SDK
+### Use with the Stashbase Node SDK
 
 `@stashbase/agent-proxy` is standalone: it does not require the Stashbase Node
 SDK at runtime. They work well together, however, because the trusted
@@ -100,7 +70,7 @@ The dependency direction is intentional: the application owns Stashbase SDK
 authentication and secret resolution; Agent Proxy owns the short-lived local
 credential boundary. This package never imports or requires the Node SDK.
 
-## Use with the Anthropic SDK
+### Use with the Anthropic SDK
 
 Pass an existing, application-configured Anthropic client to the proxy. This
 preserves the client's API key, base URL, retries, and all other SDK options;
@@ -139,7 +109,7 @@ Use a credential binding instead when Anthropic credentials must be available
 to an agent tool. The trusted application still chooses the binding name,
 header, and permitted hosts.
 
-## Use with Vercel AI SDK
+### Use with Vercel AI SDK
 
 Pass the proxy fetch implementation while creating an AI SDK provider. This
 works in ordinary Node applications and on any host; Vercel deployment is not
@@ -175,6 +145,38 @@ try {
 
 The same `fetch` value can be passed to other AI SDK provider factories that
 support a custom `fetch`, including the Anthropic provider.
+
+## Remote Agent Proxy
+
+`RemoteAgentProxy` creates a short-lived, control-plane-backed session. The
+trusted application supplies its Stashbase API key; the agent receives only
+placeholders and a localhost proxy URL. The session token and resolved secret
+values stay in the parent process and are revoked when `stop()` completes.
+
+```ts
+import { RemoteAgentProxy } from '@stashbase/agent-proxy'
+
+const proxy = new RemoteAgentProxy({
+  apiKey: process.env.STASHBASE_API_KEY!,
+  project: 'platform',
+  environment: 'development',
+  egressHosts: ['api.openai.com'],
+  bindings: {
+    OPENAI_API_KEY: { from: 'OPENAI_API_KEY', env: 'OPENAI_API_KEY', hosts: ['api.openai.com'] },
+  },
+})
+
+const started = await proxy.start()
+if (!started.ok) throw new Error(started.error.message)
+
+try {
+  // Give proxy.childEnv to the agent or tool process. It contains only
+  // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
+} finally {
+  const stopped = await proxy.stop()
+  if (!stopped.ok) console.error(stopped.error)
+}
+```
 
 ## Why use it
 
