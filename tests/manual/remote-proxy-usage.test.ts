@@ -116,8 +116,12 @@ it.skipIf(!runLiveTest)(
       expect(finalResponse.output_text).not.toBe('')
     } finally {
       console.log('Stopping remote proxy session…')
-      await proxy.stop()
-      console.log('Remote proxy session stopped')
+      const stopped = await proxy.stop()
+      if (!stopped.ok) {
+        console.error('Remote proxy session could not stop cleanly:', stopped.error)
+        throw new Error(stopped.error.message)
+      }
+      console.log(`Remote proxy session stopped (${stopped.status ?? 'no remote request'})`)
     }
   },
   60_000
