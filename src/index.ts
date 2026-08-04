@@ -35,5 +35,6 @@ export type {
   RemoteAgentProxyOptions,
   RemoteAgentProxyStartError,
   RemoteAgentProxyStartResult,
+  RemoteAgentProxyStopResult,
   StartLocalAgentProxyOptions,
 } from './types'

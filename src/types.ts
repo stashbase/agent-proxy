@@ -107,6 +107,11 @@ export type RemoteAgentProxyStartResult<Proxy> =
   | { ok: true; data: Proxy; error: null; status: number | null }
   | { ok: false; data: null; error: RemoteAgentProxyStartError; status: number | null }
 
+/** Node SDK-style outcome returned by {@link RemoteAgentProxy.stop}. */
+export type RemoteAgentProxyStopResult =
+  | { ok: true; data: null; error: null; status: number | null }
+  | { ok: false; data: null; error: RemoteAgentProxyStartError; status: number | null }
+
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
 
 export type LocalAgentProxy<Names extends string = never> = {
@@ -119,7 +124,7 @@ export type LocalAgentProxy<Names extends string = never> = {
 
   childEnv: Record<string, string>
 
-  stop(): Promise<void>
+  stop(): Promise<void | RemoteAgentProxyStopResult>
 }
 
 export type OpenAIClientConstructor = new (options: ClientOptions) => import('openai').default

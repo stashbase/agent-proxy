@@ -25,6 +25,7 @@ import type {
   RemoteAgentProxyOptions,
   RemoteAgentProxyStartError,
   RemoteAgentProxyStartResult,
+  RemoteAgentProxyStopResult,
 } from './types'
 
 type RemoteSession = {
@@ -43,7 +44,9 @@ type ResolvedBinding = RemoteAgentProxyBinding & {
   valueTemplate: string
 }
 
-type ActiveRemoteProxy<Names extends string> = LocalAgentProxy<Names>
+type ActiveRemoteProxy<Names extends string> = Omit<LocalAgentProxy<Names>, 'stop'> & {
+  stop(): Promise<RemoteAgentProxyStopResult>
+}
 
 class RemoteProxyStartupError extends Error {
   constructor(
@@ -191,21 +194,31 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
     placeholders,
     childEnv,
     async stop() {
-      if (stopped) return
+      if (stopped) return { ok: true, data: null, error: null, status: null }
       stopped = true
       rotation.abort()
       await rotationTask
-      for (const socket of sockets) socket.destroy()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
-      await rm(directory, { recursive: true, force: true })
-      await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
-        method: 'DELETE',
-        headers: {
-          authorization: `Bearer ${options.apiKey}`,
-          'x-stashbase-session': session.session_token,
-        },
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => {})
+      try {
+        for (const socket of sockets) socket.destroy()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+        await rm(directory, { recursive: true, force: true })
+      } catch (error) {
+        return remoteStopError(error)
+      }
+      try {
+        const response = await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
+          method: 'DELETE',
+          headers: {
+            authorization: `Bearer ${options.apiKey}`,
+            'x-stashbase-session': session.session_token,
+          },
+          signal: AbortSignal.timeout(5_000),
+        })
+        if (response.ok) return { ok: true, data: null, error: null, status: response.status }
+        return remoteStopError(await responseError(response))
+      } catch (error) {
+        return remoteStopError(error)
+      }
     },
   }
 }
@@ -441,11 +454,18 @@ export class RemoteAgentProxy<
       result.error.details
     )
   }
-  async stop(): Promise<void> {
-    if (this.#starting) await this.#starting
+  /** Stops the local relay and revokes the remote session. */
+  async stop(): Promise<RemoteAgentProxyStopResult> {
+    if (this.#starting) {
+      try {
+        await this.#starting
+      } catch (error) {
+        return remoteStopError(error)
+      }
+    }
     const proxy = this.#current
     this.#current = undefined
-    await proxy?.stop()
+    return proxy ? await proxy.stop() : { ok: true, data: null, error: null, status: null }
   }
   private active() {
     const proxy = this.#current ?? this.#last
@@ -480,4 +500,25 @@ function remoteStartError(error: unknown): { error: RemoteAgentProxyStartError; 
     },
     status: null,
   }
+}
+
+async function responseError(response: Response): Promise<RemoteProxyStartupError> {
+  const body = await response.text()
+  let details: unknown = body || undefined
+  let message = `Remote Agent Proxy session request failed (${response.status})`
+  let code = 'remote.session_request_failed'
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string; message?: string } }
+    details = parsed
+    if (parsed.error?.code) code = parsed.error.code
+    if (parsed.error?.message) message = parsed.error.message
+  } catch {
+    // Some gateways return plain text or an empty error response.
+  }
+  return new RemoteProxyStartupError(code, message, response.status, details)
+}
+
+function remoteStopError(error: unknown): RemoteAgentProxyStopResult {
+  const failure = remoteStartError(error)
+  return { ok: false, data: null, error: failure.error, status: failure.status }
 }
