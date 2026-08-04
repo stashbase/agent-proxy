@@ -66,6 +66,35 @@ export type StartLocalAgentProxyOptions = {
   hooks?: AgentProxyHooks
 }
 
+/** A secret reference resolved by the Stashbase remote Agent Proxy, never locally. */
+export type RemoteAgentProxyBinding = Omit<AgentProxyBinding, 'secret'> & {
+  /** Remote Stashbase secret name. Defaults to the binding name. */
+  from?: string
+  /** Placeholder exposed to the agent. Defaults to `${STASHBASE_<binding name>}`. */
+  placeholder?: string
+}
+
+/**
+ * Configuration for a short-lived Stashbase-managed Agent Proxy session.
+ *
+ * Unlike {@link StartLocalAgentProxyOptions}, the Stashbase control plane
+ * resolves secrets and hosts the remote proxy. The API remains authoritative
+ * for access checks on both session creation and replacement.
+ */
+export type RemoteAgentProxyOptions = {
+  /** Stashbase API key used only by the trusted application to create/revoke the session. */
+  apiKey: string
+  /** Project ID or name. */
+  project: string
+  /** Environment ID or name within the project. */
+  environment: string
+  egressHosts: string[]
+  denyHosts?: string[]
+  bindings: Record<string, RemoteAgentProxyBinding>
+  /** Defaults to https://api.stashbase.dev. */
+  apiUrl?: string
+}
+
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
 
 export type LocalAgentProxy<Names extends string = never> = {

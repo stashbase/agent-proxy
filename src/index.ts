@@ -2,6 +2,7 @@ export { createAnthropicProxyClient } from './anthropic'
 export { createOpenAIProxyClient, createOpenAIProxyFetch } from './openai-fetch'
 export { createVercelAIProxyFetch } from './vercel-ai'
 export { AgentProxy, startLocalAgentProxy } from './proxy'
+export { RemoteAgentProxy, startRemoteAgentProxy } from './remote-proxy'
 export {
   createSandboxedToolExecutor,
   createSandboxedToolModule,
@@ -30,5 +31,7 @@ export type {
   SandboxedToolOptions,
   TypedSandboxedToolExecutor,
   OpenAIClientConstructor,
+  RemoteAgentProxyBinding,
+  RemoteAgentProxyOptions,
   StartLocalAgentProxyOptions,
 } from './types'
