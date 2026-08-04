@@ -45,7 +45,11 @@ it.skipIf(!runLiveTest)(
     })
 
     console.log('Waiting for remote proxy session creation…')
-    await proxy.start()
+    const started = await proxy.start()
+    if (!started.ok) {
+      console.error('Remote proxy session could not start:', started.error)
+      throw new Error(started.error.message)
+    }
     try {
       console.log(`Remote proxy started at ${proxy.url}; OpenAI host: ${openAIHost}`)
       expect(proxy.childEnv.OPENAI_API_KEY).toBe('${STASHBASE_OPENAI_API_KEY}')
