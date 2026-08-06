@@ -197,7 +197,6 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
       SSL_CERT_FILE: caPath,
       CURL_CA_BUNDLE: caPath,
       GIT_SSL_CAINFO: caPath,
-      CODEX_CA_CERTIFICATE: caPath,
     }
     for (const [name, binding] of Object.entries(bindings))
       childEnv[binding.env ?? name] = placeholders[name]
@@ -449,7 +448,8 @@ function openRemoteConnection(remoteUrl: URL, caPath: string): Promise<Socket | 
  *
  * Construct this trusted parent-process object with an API key, project, and
  * environment, then call {@link start}. Agent code receives only placeholders,
- * a localhost relay URL, and the public remote-proxy CA.
+ * a localhost relay URL, and the public remote-proxy CA. The CA is stored at a
+ * temporary `ca.pem` path for child processes and removed on shutdown.
  */
 export class RemoteAgentProxy<
   const Bindings extends Record<string, RemoteAgentProxyBinding> = Record<

@@ -152,6 +152,9 @@ support a custom `fetch`, including the Anthropic provider.
 trusted application supplies its Stashbase API key; the agent receives only
 placeholders and a localhost proxy URL. The session token and resolved secret
 values stay in the parent process and are revoked when `stop()` completes.
+The remote public CA is written to a random temporary directory as `ca.pem`;
+its path is exposed through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
+`CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops.
 
 ```ts
 import { RemoteAgentProxy } from '@stashbase/agent-proxy'
