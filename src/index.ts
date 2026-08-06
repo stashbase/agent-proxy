@@ -36,7 +36,7 @@ export type {
   RemoteAgentProxyHooks,
   RemoteAgentProxyOptions,
   RemoteAgentProxyRelayErrorEvent,
-  RemoteAgentProxyRotationHealthEvent,
+  RemoteAgentProxySessionRefreshEvent,
   RemoteAgentProxyStartError,
   RemoteAgentProxyStartResult,
   RemoteAgentProxyStopResult,

@@ -188,7 +188,7 @@ credentials, session tokens, request paths, or bodies:
 const proxy = new RemoteAgentProxy({
   // …session configuration
   hooks: {
-    onRotationHealth: (event) => {
+    onSessionRefresh: (event) => {
       if (event.state === 'failed') console.warn(event.error, event.retryInMs)
     },
     onRelayError: (event) => console.warn(event.kind, event.host, event.error),

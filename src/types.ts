@@ -74,8 +74,8 @@ export type RemoteAgentProxyBinding = Omit<AgentProxyBinding, 'secret'> & {
   placeholder?: string
 }
 
-/** Metadata-only session rotation health event. It never includes session tokens or secrets. */
-export type RemoteAgentProxyRotationHealthEvent =
+/** Metadata-only session refresh event. It never includes session tokens or secrets. */
+export type RemoteAgentProxySessionRefreshEvent =
   | { state: 'succeeded'; expiresAt: string }
   | {
       state: 'failed'
@@ -93,7 +93,7 @@ export type RemoteAgentProxyRelayErrorEvent = {
 
 /** Read-only observability hooks for a Remote Agent Proxy session. */
 export type RemoteAgentProxyHooks = {
-  onRotationHealth?: (event: RemoteAgentProxyRotationHealthEvent) => void | Promise<void>
+  onSessionRefresh?: (event: RemoteAgentProxySessionRefreshEvent) => void | Promise<void>
   onRelayError?: (event: RemoteAgentProxyRelayErrorEvent) => void | Promise<void>
 }
 

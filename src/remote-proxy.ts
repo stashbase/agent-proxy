@@ -25,7 +25,7 @@ import type {
   RemoteAgentProxyHooks,
   RemoteAgentProxyOptions,
   RemoteAgentProxyRelayErrorEvent,
-  RemoteAgentProxyRotationHealthEvent,
+  RemoteAgentProxySessionRefreshEvent,
   RemoteAgentProxyStartError,
   RemoteAgentProxyStartResult,
   RemoteAgentProxyStopResult,
@@ -380,7 +380,7 @@ async function rotateSessions(
         transportIdentity
       ) {
         await revokeSession(apiUrl, options.apiKey, replacement.session_token)
-        emitRotationHealth(options.hooks, {
+        emitSessionRefresh(options.hooks, {
           state: 'failed',
           expiresAt: current.expires_at,
           retryInMs: 0,
@@ -406,7 +406,7 @@ async function rotateSessions(
         },
         signal: AbortSignal.timeout(5_000),
       }).catch(() => {})
-      emitRotationHealth(options.hooks, { state: 'succeeded', expiresAt: replacement.expires_at })
+      emitSessionRefresh(options.hooks, { state: 'succeeded', expiresAt: replacement.expires_at })
     } catch (error) {
       if (signal.aborted) return
       // The active session stays usable through its advertised expiry. Retrying
@@ -414,7 +414,7 @@ async function rotateSessions(
       // to recover without churning requests.
       const retryFor = Math.min(60_000, Math.max(0, expiresAt - Date.now()))
       const failure = remoteStartError(error)
-      emitRotationHealth(options.hooks, {
+      emitSessionRefresh(options.hooks, {
         state: 'failed',
         expiresAt: current.expires_at,
         retryInMs: retryFor,
@@ -430,13 +430,13 @@ async function rotateSessions(
   }
 }
 
-function emitRotationHealth(
+function emitSessionRefresh(
   hooks: RemoteAgentProxyHooks | undefined,
-  event: RemoteAgentProxyRotationHealthEvent
+  event: RemoteAgentProxySessionRefreshEvent
 ): void {
-  if (!hooks?.onRotationHealth) return
+  if (!hooks?.onSessionRefresh) return
   void Promise.resolve()
-    .then(() => hooks.onRotationHealth!(Object.freeze({ ...event })))
+    .then(() => hooks.onSessionRefresh!(Object.freeze({ ...event })))
     .catch(() => {})
 }
 
