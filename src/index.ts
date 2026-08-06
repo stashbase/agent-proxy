@@ -10,6 +10,7 @@ export {
 } from './tool-runner'
 export type {
   AgentProxyBinding,
+  AgentProxyTransport,
   AgentProxyAfterResponseHookContext,
   AgentProxyBeforeRequestHookContext,
   AgentProxyDeniedHookContext,

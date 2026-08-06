@@ -114,7 +114,8 @@ export type RemoteAgentProxyStopResult =
 
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
 
-export type LocalAgentProxy<Names extends string = never> = {
+/** Shared connection details used by proxy-aware SDK adapters and tool workers. */
+export type AgentProxyTransport<Names extends string = never> = {
   url: string
 
   caPath: string
@@ -124,13 +125,17 @@ export type LocalAgentProxy<Names extends string = never> = {
 
   childEnv: Record<string, string>
 
-  stop(): Promise<void | RemoteAgentProxyStopResult>
+}
+
+/** A local proxy with lifecycle ownership of disposable local CA material. */
+export type LocalAgentProxy<Names extends string = never> = AgentProxyTransport<Names> & {
+  stop(): Promise<void>
 }
 
 export type OpenAIClientConstructor = new (options: ClientOptions) => import('openai').default
 
 export type CreateOpenAIProxyClientOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 
   /** Defaults to OPENAI_API_KEY. Select another configured binding explicitly when needed. */
   apiKeyBinding?: string
@@ -143,12 +148,12 @@ export type FetchConfigurableClient<Client> = {
 
 /** Options for wrapping an existing official Anthropic client. */
 export type CreateAnthropicProxyClientOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 }
 
 /** Configuration for an isolated Node worker that implements an agent tool. */
 export type SandboxedToolOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 
   /** File URL or absolute path of an ESM/CommonJS module exporting the tool function. */
   module: URL | string

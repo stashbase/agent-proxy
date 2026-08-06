@@ -19,7 +19,7 @@ import type {
   CreateAnthropicProxyClientOptions,
   CreateOpenAIProxyClientOptions,
   FetchConfigurableClient,
-  LocalAgentProxy,
+  AgentProxyTransport,
   OpenAIClientConstructor,
   RemoteAgentProxyBinding,
   RemoteAgentProxyOptions,
@@ -44,7 +44,7 @@ type ResolvedBinding = RemoteAgentProxyBinding & {
   valueTemplate: string
 }
 
-type ActiveRemoteProxy<Names extends string> = Omit<LocalAgentProxy<Names>, 'stop'> & {
+type ActiveRemoteProxy<Names extends string> = AgentProxyTransport<Names> & {
   stop(): Promise<RemoteAgentProxyStopResult>
 }
 
@@ -456,7 +456,7 @@ export class RemoteAgentProxy<
     string,
     RemoteAgentProxyBinding
   >,
-> implements LocalAgentProxy<Extract<keyof Bindings, string>> {
+> implements AgentProxyTransport<Extract<keyof Bindings, string>> {
   #current?: ActiveRemoteProxy<Extract<keyof Bindings, string>>
   #last?: ActiveRemoteProxy<Extract<keyof Bindings, string>>
   #starting?: Promise<ActiveRemoteProxy<Extract<keyof Bindings, string>>>
