@@ -22,7 +22,10 @@ import type {
   AgentProxyTransport,
   OpenAIClientConstructor,
   RemoteAgentProxyBinding,
+  RemoteAgentProxyHooks,
   RemoteAgentProxyOptions,
+  RemoteAgentProxyRelayErrorEvent,
+  RemoteAgentProxyRotationHealthEvent,
   RemoteAgentProxyStartError,
   RemoteAgentProxyStartResult,
   RemoteAgentProxyStopResult,
@@ -108,7 +111,12 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
     let stopped = false
     server = createHttpServer((request, response) => {
       const upstream = requestToRemote(remoteUrl, caPath, () => session.session_token, request)
-      upstream.once('error', () => {
+      upstream.once('error', (error) => {
+        emitRelayError(options.hooks, {
+          kind: 'request',
+          host: relayHost(request),
+          error: relayError(error),
+        })
         if (!response.headersSent) response.writeHead(502)
         response.end()
       })
@@ -132,7 +140,14 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
         .then((upstream) => {
           sockets.add(upstream)
           upstream.once('close', () => sockets.delete(upstream))
-          upstream.once('error', () => socket.destroy())
+          upstream.once('error', (error) => {
+            emitRelayError(options.hooks, {
+              kind: 'connect',
+              host: hostFromAuthority(target),
+              error: relayError(error),
+            })
+            socket.destroy()
+          })
           upstream.write(
             `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: Bearer ${session.session_token}\r\n\r\n`
           )
@@ -145,6 +160,14 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
             const header = response.subarray(0, end + 4)
             const remaining = response.subarray(end + 4)
             if (!/^HTTP\/1\.[01] 200\b/.test(header.toString('latin1'))) {
+              emitRelayError(options.hooks, {
+                kind: 'connect',
+                host: hostFromAuthority(target),
+                error: {
+                  code: 'remote.relay_rejected',
+                  message: 'Remote Agent Proxy rejected the CONNECT request',
+                },
+              })
               socket.end(header)
               upstream.destroy()
               return
@@ -156,7 +179,14 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
           }
           upstream.on('data', receiveConnect)
         })
-        .catch(() => socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'))
+        .catch((error) => {
+          emitRelayError(options.hooks, {
+            kind: 'connect',
+            host: hostFromAuthority(target),
+            error: relayError(error),
+          })
+          socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+        })
     })
     await new Promise<void>((resolve, reject) => {
       server!.once('error', reject)
@@ -350,6 +380,16 @@ async function rotateSessions(
         transportIdentity
       ) {
         await revokeSession(apiUrl, options.apiKey, replacement.session_token)
+        emitRotationHealth(options.hooks, {
+          state: 'failed',
+          expiresAt: current.expires_at,
+          retryInMs: 0,
+          error: {
+            code: 'remote.rotation_incompatible',
+            message: 'Remote Agent Proxy changed its transport or CA during session rotation',
+            status: null,
+          },
+        })
         return
       }
       const previousToken = current.session_token
@@ -366,12 +406,20 @@ async function rotateSessions(
         },
         signal: AbortSignal.timeout(5_000),
       }).catch(() => {})
+      emitRotationHealth(options.hooks, { state: 'succeeded', expiresAt: replacement.expires_at })
     } catch (error) {
       if (signal.aborted) return
       // The active session stays usable through its advertised expiry. Retrying
       // at most once per minute gives transient control-plane failures a chance
       // to recover without churning requests.
       const retryFor = Math.min(60_000, Math.max(0, expiresAt - Date.now()))
+      const failure = remoteStartError(error)
+      emitRotationHealth(options.hooks, {
+        state: 'failed',
+        expiresAt: current.expires_at,
+        retryInMs: retryFor,
+        error: { ...failure.error, status: failure.status },
+      })
       if (!retryFor) return
       try {
         await sleep(retryFor, signal)
@@ -379,6 +427,55 @@ async function rotateSessions(
         return
       }
     }
+  }
+}
+
+function emitRotationHealth(
+  hooks: RemoteAgentProxyHooks | undefined,
+  event: RemoteAgentProxyRotationHealthEvent
+): void {
+  if (!hooks?.onRotationHealth) return
+  void Promise.resolve()
+    .then(() => hooks.onRotationHealth!(Object.freeze({ ...event })))
+    .catch(() => {})
+}
+
+function emitRelayError(
+  hooks: RemoteAgentProxyHooks | undefined,
+  event: RemoteAgentProxyRelayErrorEvent
+): void {
+  if (!hooks?.onRelayError) return
+  void Promise.resolve()
+    .then(() => hooks.onRelayError!(Object.freeze({ ...event })))
+    .catch(() => {})
+}
+
+function relayError(error: unknown): { code: string; message: string } {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return {
+      code: error.code,
+      message: error instanceof Error ? error.message : 'Remote Agent Proxy relay failed',
+    }
+  }
+  return {
+    code: 'remote.relay_failed',
+    message: error instanceof Error ? error.message : 'Remote Agent Proxy relay failed',
+  }
+}
+
+function hostFromAuthority(authority: string): string | undefined {
+  try {
+    return new URL(`http://${authority}`).hostname || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function relayHost(request: IncomingMessage): string | undefined {
+  try {
+    return new URL(request.url ?? '').hostname || undefined
+  } catch {
+    return request.headers.host ? hostFromAuthority(request.headers.host) : undefined
   }
 }
 

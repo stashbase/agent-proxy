@@ -181,6 +181,21 @@ try {
 }
 ```
 
+Use remote hooks for metadata-only operational visibility. They never receive
+credentials, session tokens, request paths, or bodies:
+
+```ts
+const proxy = new RemoteAgentProxy({
+  // …session configuration
+  hooks: {
+    onRotationHealth: (event) => {
+      if (event.state === 'failed') console.warn(event.error, event.retryInMs)
+    },
+    onRelayError: (event) => console.warn(event.kind, event.host, event.error),
+  },
+})
+```
+
 ## Why use it
 
 Agent frameworks, tool workers, logs, and model-provider requests often cross

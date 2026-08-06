@@ -74,6 +74,29 @@ export type RemoteAgentProxyBinding = Omit<AgentProxyBinding, 'secret'> & {
   placeholder?: string
 }
 
+/** Metadata-only session rotation health event. It never includes session tokens or secrets. */
+export type RemoteAgentProxyRotationHealthEvent =
+  | { state: 'succeeded'; expiresAt: string }
+  | {
+      state: 'failed'
+      expiresAt: string
+      retryInMs: number
+      error: { code: string; message: string; status: number | null }
+    }
+
+/** Metadata-only failure while the localhost relay connects to the remote proxy. */
+export type RemoteAgentProxyRelayErrorEvent = {
+  kind: 'request' | 'connect'
+  host?: string
+  error: { code: string; message: string }
+}
+
+/** Read-only observability hooks for a Remote Agent Proxy session. */
+export type RemoteAgentProxyHooks = {
+  onRotationHealth?: (event: RemoteAgentProxyRotationHealthEvent) => void | Promise<void>
+  onRelayError?: (event: RemoteAgentProxyRelayErrorEvent) => void | Promise<void>
+}
+
 /**
  * Configuration for a short-lived Stashbase-managed Agent Proxy session.
  *
@@ -91,6 +114,7 @@ export type RemoteAgentProxyOptions = {
   egressHosts: string[]
   denyHosts?: string[]
   bindings: Record<string, RemoteAgentProxyBinding>
+  hooks?: RemoteAgentProxyHooks
   /** Defaults to https://api.stashbase.dev. */
   apiUrl?: string
 }
@@ -124,7 +148,6 @@ export type AgentProxyTransport<Names extends string = never> = {
   placeholders: Record<string, string> & { [Name in Names]: SecretPlaceholder<Name> }
 
   childEnv: Record<string, string>
-
 }
 
 /** A local proxy with lifecycle ownership of disposable local CA material. */
