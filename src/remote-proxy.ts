@@ -48,6 +48,8 @@ type ActiveRemoteProxy<Names extends string> = Omit<LocalAgentProxy<Names>, 'sto
   stop(): Promise<RemoteAgentProxyStopResult>
 }
 
+const CONTROL_PLANE_TIMEOUT_MS = 10_000
+
 class RemoteProxyStartupError extends Error {
   constructor(
     readonly code: string,
@@ -90,136 +92,154 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
 ): Promise<ActiveRemoteProxy<Extract<keyof Bindings, string>>> {
   const bindings = resolveBindings(options.bindings)
   const apiUrl = (options.apiUrl ?? 'https://api.stashbase.dev').replace(/\/$/, '')
-  let session = await requestSession(options, bindings, apiUrl)
-  const proxyCa = session.proxy_ca!
-  const directory = await mkdtemp(join(tmpdir(), 'stashbase-remote-agent-proxy-'))
-  const caPath = join(directory, 'ca.pem')
-  await writeFile(caPath, proxyCa.pem, { mode: 0o600 })
-
-  const remoteUrl = new URL(session.proxy_url, apiUrl)
-  const transportIdentity = `${remoteUrl.href}\n${proxyCa.sha256.toLowerCase()}`
-  const rotation = new AbortController()
-  const rotationTask = rotateSessions(options, bindings, apiUrl, session, transportIdentity, rotation.signal)
+  const session = await requestSession(options, bindings, apiUrl)
   const sockets = new Set<Socket>()
-  let stopped = false
-  const server = createHttpServer((request, response) => {
-    const upstream = requestToRemote(remoteUrl, caPath, () => session.session_token, request)
-    upstream.once('error', () => {
-      if (!response.headersSent) response.writeHead(502)
-      response.end()
-    })
-    upstream.once('response', (remoteResponse) => {
-      response.writeHead(remoteResponse.statusCode ?? 502, remoteResponse.headers)
-      remoteResponse.pipe(response)
-    })
-    request.pipe(upstream)
-  })
-  server.on('connection', (socket) => {
-    sockets.add(socket)
-    socket.once('close', () => sockets.delete(socket))
-  })
-  server.on('connect', (request, socket, head) => {
-    const target = request.url
-    if (!target || /[/?#@]/.test(target)) {
-      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
-      return
-    }
-    void openRemoteConnection(remoteUrl, caPath)
-      .then((upstream) => {
-        sockets.add(upstream)
-        upstream.once('close', () => sockets.delete(upstream))
-        upstream.once('error', () => socket.destroy())
-        upstream.write(
-          `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: Bearer ${session.session_token}\r\n\r\n`
-        )
-        let response = Buffer.alloc(0)
-        const receiveConnect = (chunk: Buffer) => {
-          response = Buffer.concat([response, chunk])
-          const end = response.indexOf('\r\n\r\n')
-          if (end < 0) return
-          upstream.off('data', receiveConnect)
-          const header = response.subarray(0, end + 4)
-          const remaining = response.subarray(end + 4)
-          if (!/^HTTP\/1\.[01] 200\b/.test(header.toString('latin1'))) {
-            socket.end(header)
-            upstream.destroy()
-            return
-          }
-          socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
-          if (head.length) upstream.write(head)
-          if (remaining.length) socket.write(remaining)
-          socket.pipe(upstream).pipe(socket)
-        }
-        upstream.on('data', receiveConnect)
+  let directory: string | undefined
+  let server: ReturnType<typeof createHttpServer> | undefined
+
+  try {
+    const proxyCa = session.proxy_ca!
+    directory = await mkdtemp(join(tmpdir(), 'stashbase-remote-agent-proxy-'))
+    const caPath = join(directory, 'ca.pem')
+    await writeFile(caPath, proxyCa.pem, { mode: 0o600 })
+
+    const remoteUrl = new URL(session.proxy_url, apiUrl)
+    const transportIdentity = `${remoteUrl.href}\n${proxyCa.sha256.toLowerCase()}`
+    let stopped = false
+    server = createHttpServer((request, response) => {
+      const upstream = requestToRemote(remoteUrl, caPath, () => session.session_token, request)
+      upstream.once('error', () => {
+        if (!response.headersSent) response.writeHead(502)
+        response.end()
       })
-      .catch(() => socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'))
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject)
-      resolve()
+      upstream.once('response', (remoteResponse) => {
+        response.writeHead(remoteResponse.statusCode ?? 502, remoteResponse.headers)
+        remoteResponse.pipe(response)
+      })
+      request.pipe(upstream)
     })
-  })
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Remote Agent Proxy did not receive a TCP address')
-  const url = `http://127.0.0.1:${address.port}`
-  const placeholders = Object.fromEntries(
-    Object.entries(bindings).map(([name, binding]) => [name, binding.placeholder])
-  ) as ActiveRemoteProxy<Extract<keyof Bindings, string>>['placeholders']
-  const childEnv: Record<string, string> = {
-    HTTP_PROXY: url,
-    HTTPS_PROXY: url,
-    http_proxy: url,
-    https_proxy: url,
-    NODE_EXTRA_CA_CERTS: caPath,
-    NODE_USE_ENV_PROXY: '1',
-    NO_PROXY: '',
-    no_proxy: '',
-    ALL_PROXY: '',
-    all_proxy: '',
-    npm_config_proxy: '',
-    npm_config_https_proxy: '',
-    SSL_CERT_FILE: caPath,
-    CURL_CA_BUNDLE: caPath,
-    GIT_SSL_CAINFO: caPath,
-    CODEX_CA_CERTIFICATE: caPath,
-  }
-  for (const [name, binding] of Object.entries(bindings))
-    childEnv[binding.env ?? name] = placeholders[name]
-  return {
-    url,
-    caPath,
-    placeholders,
-    childEnv,
-    async stop() {
-      if (stopped) return { ok: true, data: null, error: null, status: null }
-      stopped = true
-      rotation.abort()
-      await rotationTask
-      try {
-        for (const socket of sockets) socket.destroy()
-        await new Promise<void>((resolve) => server.close(() => resolve()))
-        await rm(directory, { recursive: true, force: true })
-      } catch (error) {
-        return remoteStopError(error)
+    server.on('connection', (socket) => {
+      sockets.add(socket)
+      socket.once('close', () => sockets.delete(socket))
+    })
+    server.on('connect', (request, socket, head) => {
+      const target = request.url
+      if (!target || /[/?#@]/.test(target)) {
+        socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+        return
       }
-      try {
-        const response = await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
-          method: 'DELETE',
-          headers: {
-            authorization: `Bearer ${options.apiKey}`,
-            'x-stashbase-session': session.session_token,
-          },
-          signal: AbortSignal.timeout(5_000),
+      void openRemoteConnection(remoteUrl, caPath)
+        .then((upstream) => {
+          sockets.add(upstream)
+          upstream.once('close', () => sockets.delete(upstream))
+          upstream.once('error', () => socket.destroy())
+          upstream.write(
+            `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: Bearer ${session.session_token}\r\n\r\n`
+          )
+          let response = Buffer.alloc(0)
+          const receiveConnect = (chunk: Buffer) => {
+            response = Buffer.concat([response, chunk])
+            const end = response.indexOf('\r\n\r\n')
+            if (end < 0) return
+            upstream.off('data', receiveConnect)
+            const header = response.subarray(0, end + 4)
+            const remaining = response.subarray(end + 4)
+            if (!/^HTTP\/1\.[01] 200\b/.test(header.toString('latin1'))) {
+              socket.end(header)
+              upstream.destroy()
+              return
+            }
+            socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+            if (head.length) upstream.write(head)
+            if (remaining.length) socket.write(remaining)
+            socket.pipe(upstream).pipe(socket)
+          }
+          upstream.on('data', receiveConnect)
         })
-        if (response.ok) return { ok: true, data: null, error: null, status: response.status }
-        return remoteStopError(await responseError(response))
-      } catch (error) {
-        return remoteStopError(error)
-      }
-    },
+        .catch(() => socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'))
+    })
+    await new Promise<void>((resolve, reject) => {
+      server!.once('error', reject)
+      server!.listen(0, '127.0.0.1', () => {
+        server!.off('error', reject)
+        resolve()
+      })
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string')
+      throw new Error('Remote Agent Proxy did not receive a TCP address')
+    const rotation = new AbortController()
+    const rotationTask = rotateSessions(
+      options,
+      bindings,
+      apiUrl,
+      session,
+      transportIdentity,
+      rotation.signal
+    )
+    const url = `http://127.0.0.1:${address.port}`
+    const placeholders = Object.fromEntries(
+      Object.entries(bindings).map(([name, binding]) => [name, binding.placeholder])
+    ) as ActiveRemoteProxy<Extract<keyof Bindings, string>>['placeholders']
+    const childEnv: Record<string, string> = {
+      HTTP_PROXY: url,
+      HTTPS_PROXY: url,
+      http_proxy: url,
+      https_proxy: url,
+      NODE_EXTRA_CA_CERTS: caPath,
+      NODE_USE_ENV_PROXY: '1',
+      NO_PROXY: '',
+      no_proxy: '',
+      ALL_PROXY: '',
+      all_proxy: '',
+      npm_config_proxy: '',
+      npm_config_https_proxy: '',
+      SSL_CERT_FILE: caPath,
+      CURL_CA_BUNDLE: caPath,
+      GIT_SSL_CAINFO: caPath,
+      CODEX_CA_CERTIFICATE: caPath,
+    }
+    for (const [name, binding] of Object.entries(bindings))
+      childEnv[binding.env ?? name] = placeholders[name]
+    return {
+      url,
+      caPath,
+      placeholders,
+      childEnv,
+      async stop() {
+        if (stopped) return { ok: true, data: null, error: null, status: null }
+        stopped = true
+        rotation.abort()
+        await rotationTask
+        try {
+          for (const socket of sockets) socket.destroy()
+          await new Promise<void>((resolve) => server!.close(() => resolve()))
+          await rm(directory!, { recursive: true, force: true })
+        } catch (error) {
+          return remoteStopError(error)
+        }
+        try {
+          const response = await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
+            method: 'DELETE',
+            headers: {
+              authorization: `Bearer ${options.apiKey}`,
+              'x-stashbase-session': session.session_token,
+            },
+            signal: AbortSignal.timeout(5_000),
+          })
+          if (response.ok) return { ok: true, data: null, error: null, status: response.status }
+          return remoteStopError(await responseError(response))
+        } catch (error) {
+          return remoteStopError(error)
+        }
+      },
+    }
+  } catch (error) {
+    for (const socket of sockets) socket.destroy()
+    if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
+    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
+    await revokeSession(apiUrl, options.apiKey, session.session_token)
+    throw error
   }
 }
 
@@ -229,31 +249,50 @@ async function requestSession(
   apiUrl: string,
   previousSessionToken?: string
 ): Promise<RemoteSession> {
-  const response = await fetch(`${apiUrl}/v1/agent-proxy/sessions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${options.apiKey}`,
-      'content-type': 'application/json',
-      ...(previousSessionToken ? { 'x-stashbase-previous-session': previousSessionToken } : {}),
-    },
-    body: JSON.stringify({
-      project_id: options.project,
-      environment_id: options.environment,
-      egress_hosts: options.egressHosts,
-      deny_hosts: options.denyHosts ?? [],
-      bindings: Object.entries(bindings).map(([name, binding]) => ({
-        name, from: binding.from, hosts: binding.hosts, header: binding.header,
-        placeholder: binding.placeholder, value_template: binding.valueTemplate,
-      })),
-    }),
-  })
+  const signal = AbortSignal.timeout(CONTROL_PLANE_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(`${apiUrl}/v1/agent-proxy/sessions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${options.apiKey}`,
+        'content-type': 'application/json',
+        ...(previousSessionToken ? { 'x-stashbase-previous-session': previousSessionToken } : {}),
+      },
+      body: JSON.stringify({
+        project_id: options.project,
+        environment_id: options.environment,
+        egress_hosts: options.egressHosts,
+        deny_hosts: options.denyHosts ?? [],
+        bindings: Object.entries(bindings).map(([name, binding]) => ({
+          name,
+          from: binding.from,
+          hosts: binding.hosts,
+          header: binding.header,
+          placeholder: binding.placeholder,
+          value_template: binding.valueTemplate,
+        })),
+      }),
+      signal,
+    })
+  } catch (error) {
+    if (signal.aborted) {
+      throw new RemoteProxyStartupError(
+        'remote.session_request_timeout',
+        'Remote Agent Proxy session request timed out'
+      )
+    }
+    throw error
+  }
   if (!response.ok) {
     const body = await response.text()
     let details: unknown = body || undefined
     let message = `Remote Agent Proxy session request failed (${response.status})`
     let code = 'remote.session_request_failed'
     try {
-      const parsed = JSON.parse(body) as { error?: { code?: string; message?: string; details?: unknown } }
+      const parsed = JSON.parse(body) as {
+        error?: { code?: string; message?: string; details?: unknown }
+      }
       details = parsed
       if (parsed.error?.code) code = parsed.error.code
       if (parsed.error?.message) message = parsed.error.message
@@ -263,7 +302,12 @@ async function requestSession(
     throw new RemoteProxyStartupError(code, message, response.status, details)
   }
   const session = (await response.json()) as RemoteSession
-  if (!session.session_token || !session.proxy_url || session.protocol !== 'http/1.1-forward-proxy-tls-intercept' || !session.proxy_ca?.pem) {
+  if (
+    !session.session_token ||
+    !session.proxy_url ||
+    session.protocol !== 'http/1.1-forward-proxy-tls-intercept' ||
+    !session.proxy_ca?.pem
+  ) {
     throw new RemoteProxyStartupError(
       'remote.session_invalid',
       'Remote Agent Proxy returned an unsupported session'
@@ -302,7 +346,10 @@ async function rotateSessions(
       await sleep(Math.max(1_000, remaining - leadTime), signal)
       const replacement = await requestSession(options, bindings, apiUrl, current.session_token)
       const replacementUrl = new URL(replacement.proxy_url, apiUrl)
-      if (`${replacementUrl.href}\n${replacement.proxy_ca!.sha256.toLowerCase()}` !== transportIdentity) {
+      if (
+        `${replacementUrl.href}\n${replacement.proxy_ca!.sha256.toLowerCase()}` !==
+        transportIdentity
+      ) {
         await revokeSession(apiUrl, options.apiKey, replacement.session_token)
         return
       }
@@ -314,7 +361,10 @@ async function rotateSessions(
       initialSession.expires_at = replacement.expires_at
       await fetch(`${apiUrl}/v1/agent-proxy/sessions/current/retire`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${options.apiKey}`, 'x-stashbase-session': previousToken },
+        headers: {
+          authorization: `Bearer ${options.apiKey}`,
+          'x-stashbase-session': previousToken,
+        },
         signal: AbortSignal.timeout(5_000),
       }).catch(() => {})
     } catch (error) {
@@ -324,7 +374,11 @@ async function rotateSessions(
       // to recover without churning requests.
       const retryFor = Math.min(60_000, Math.max(0, expiresAt - Date.now()))
       if (!retryFor) return
-      try { await sleep(retryFor, signal) } catch { return }
+      try {
+        await sleep(retryFor, signal)
+      } catch {
+        return
+      }
     }
   }
 }
@@ -332,17 +386,31 @@ async function rotateSessions(
 function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, milliseconds)
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason) }, { once: true })
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true }
+    )
   })
 }
 
 async function revokeSession(apiUrl: string, apiKey: string, token: string): Promise<void> {
   await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
-    method: 'DELETE', headers: { authorization: `Bearer ${apiKey}`, 'x-stashbase-session': token }, signal: AbortSignal.timeout(5_000),
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${apiKey}`, 'x-stashbase-session': token },
+    signal: AbortSignal.timeout(5_000),
   }).catch(() => {})
 }
 
-function requestToRemote(remoteUrl: URL, caPath: string, token: () => string, request: IncomingMessage) {
+function requestToRemote(
+  remoteUrl: URL,
+  caPath: string,
+  token: () => string,
+  request: IncomingMessage
+) {
   const requestOptions = {
     protocol: remoteUrl.protocol,
     hostname: remoteUrl.hostname,
@@ -486,10 +554,17 @@ export async function startRemoteAgentProxy<
   return new RemoteAgentProxy(options).start()
 }
 
-function remoteStartError(error: unknown): { error: RemoteAgentProxyStartError; status: number | null } {
+function remoteStartError(error: unknown): {
+  error: RemoteAgentProxyStartError
+  status: number | null
+} {
   if (error instanceof RemoteProxyStartupError) {
     return {
-      error: { code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }) },
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(error.details === undefined ? {} : { details: error.details }),
+      },
       status: error.status,
     }
   }
