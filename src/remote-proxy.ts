@@ -285,7 +285,6 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
             headers: {
               authorization: `Bearer ${options.apiKey}`,
               'x-stashbase-session': session.session_token,
-              'x-stashbase-end-agent-run': 'true',
               'user-agent': USER_AGENT,
             },
             signal: AbortSignal.timeout(5_000),
@@ -308,7 +307,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
     if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
     else if (caPath) await rm(caPath, { force: true }).catch(() => {})
-    await revokeSession(apiUrl, options.apiKey, session.session_token, true)
+    await revokeSession(apiUrl, options.apiKey, session.session_token)
     throw error
   }
 }
@@ -540,18 +539,12 @@ function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-async function revokeSession(
-  apiUrl: string,
-  apiKey: string,
-  token: string,
-  endsAgentRun = false
-): Promise<void> {
+async function revokeSession(apiUrl: string, apiKey: string, token: string): Promise<void> {
   await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
     method: 'DELETE',
     headers: {
       authorization: `Bearer ${apiKey}`,
       'x-stashbase-session': token,
-      ...(endsAgentRun ? { 'x-stashbase-end-agent-run': 'true' } : {}),
       'user-agent': USER_AGENT,
     },
     signal: AbortSignal.timeout(5_000),
