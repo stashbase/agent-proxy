@@ -101,6 +101,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
   const apiUrl = (options.apiUrl ?? 'https://api.stashbase.dev').replace(/\/$/, '')
   const session = await requestSession(options, bindings, apiUrl)
   const sockets = new Set<Socket>()
+  const upstreamRequests = new Set<ReturnType<typeof requestToRemote>>()
   let directory: string | undefined
   let server: ReturnType<typeof createHttpServer> | undefined
 
@@ -115,6 +116,8 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
     let stopped = false
     server = createHttpServer((request, response) => {
       const upstream = requestToRemote(remoteUrl, caPath, () => session.session_token, request)
+      upstreamRequests.add(upstream)
+      upstream.once('close', () => upstreamRequests.delete(upstream))
       upstream.once('error', (error) => {
         emitRelayError(options.hooks, {
           kind: 'request',
@@ -253,7 +256,9 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
         await rotationTask
         let cleanupError: unknown
         try {
+          for (const upstream of upstreamRequests) upstream.destroy()
           for (const socket of sockets) socket.destroy()
+          server!.closeAllConnections()
           await new Promise<void>((resolve) => server!.close(() => resolve()))
           await rm(directory!, { recursive: true, force: true })
         } catch (error) {
@@ -265,6 +270,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
             headers: {
               authorization: `Bearer ${options.apiKey}`,
               'x-stashbase-session': session.session_token,
+              'x-stashbase-end-agent-run': 'true',
               'user-agent': USER_AGENT,
             },
             signal: AbortSignal.timeout(5_000),
@@ -281,10 +287,12 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
       },
     }
   } catch (error) {
+    for (const upstream of upstreamRequests) upstream.destroy()
     for (const socket of sockets) socket.destroy()
+    server?.closeAllConnections()
     if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
-    await revokeSession(apiUrl, options.apiKey, session.session_token)
+    await revokeSession(apiUrl, options.apiKey, session.session_token, true)
     throw error
   }
 }
@@ -516,12 +524,18 @@ function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-async function revokeSession(apiUrl: string, apiKey: string, token: string): Promise<void> {
+async function revokeSession(
+  apiUrl: string,
+  apiKey: string,
+  token: string,
+  endsAgentRun = false
+): Promise<void> {
   await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
     method: 'DELETE',
     headers: {
       authorization: `Bearer ${apiKey}`,
       'x-stashbase-session': token,
+      ...(endsAgentRun ? { 'x-stashbase-end-agent-run': 'true' } : {}),
       'user-agent': USER_AGENT,
     },
     signal: AbortSignal.timeout(5_000),
@@ -658,7 +672,7 @@ export class RemoteAgentProxy<
       result.error.details
     )
   }
-  /** Stops the local relay and revokes the remote session. */
+  /** Stops the local relay, revokes the remote session, and marks the agent run ended. */
   async stop(): Promise<RemoteAgentProxyStopResult> {
     if (this.#starting) {
       try {
