@@ -31,6 +31,8 @@ import type {
   RemoteAgentProxyStopResult,
 } from './types'
 
+declare const __AGENT_PROXY_VERSION__: string
+
 type RemoteSession = {
   session_id: string
   session_token: string
@@ -53,6 +55,7 @@ type ActiveRemoteProxy<Names extends string> = AgentProxyTransport<Names> & {
 
 const CONTROL_PLANE_TIMEOUT_MS = 10_000
 const RELAY_TIMEOUT_MS = 15_000
+const USER_AGENT = `stashbase/agent-proxy/${__AGENT_PROXY_VERSION__}`
 
 class RemoteProxyStartupError extends Error {
   constructor(
@@ -262,6 +265,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
             headers: {
               authorization: `Bearer ${options.apiKey}`,
               'x-stashbase-session': session.session_token,
+              'user-agent': USER_AGENT,
             },
             signal: AbortSignal.timeout(5_000),
           })
@@ -299,6 +303,7 @@ async function requestSession(
       headers: {
         authorization: `Bearer ${options.apiKey}`,
         'content-type': 'application/json',
+        'user-agent': USER_AGENT,
         ...(previousSessionToken ? { 'x-stashbase-previous-session': previousSessionToken } : {}),
       },
       body: JSON.stringify({
@@ -416,6 +421,7 @@ async function rotateSessions(
         headers: {
           authorization: `Bearer ${options.apiKey}`,
           'x-stashbase-session': previousToken,
+          'user-agent': USER_AGENT,
         },
         signal: AbortSignal.timeout(5_000),
       }).catch(() => {})
@@ -513,7 +519,11 @@ function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
 async function revokeSession(apiUrl: string, apiKey: string, token: string): Promise<void> {
   await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
     method: 'DELETE',
-    headers: { authorization: `Bearer ${apiKey}`, 'x-stashbase-session': token },
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'x-stashbase-session': token,
+      'user-agent': USER_AGENT,
+    },
     signal: AbortSignal.timeout(5_000),
   }).catch(() => {})
 }
