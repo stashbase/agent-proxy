@@ -121,6 +121,8 @@ export type RemoteAgentProxyOptions = {
    * Optional destination for the remote proxy CA. Parent directories are created
    * automatically and the file is preserved when the proxy stops. When omitted,
    * a temporary `ca.pem` file is created and removed on shutdown.
+   * Relative paths resolve from `process.cwd()`; prefer an absolute path for
+   * server applications.
    */
   caFilePath?: string
 }

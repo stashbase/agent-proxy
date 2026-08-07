@@ -156,7 +156,9 @@ The remote public CA is written to a random temporary directory as `ca.pem`;
 its path is exposed through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
 `CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops. To
 use a stable caller-owned path instead, pass `caFilePath`; its parent
-directories are created automatically and the file is kept on shutdown.
+directories are created automatically and the file is kept on shutdown. Relative
+paths resolve from the application's current working directory, so server
+applications should use an absolute path.
 
 ```ts
 import { RemoteAgentProxy } from '@stashbase/agent-proxy'
