@@ -155,10 +155,10 @@ values stay in the parent process and are revoked when `stop()` completes.
 The remote public CA is written to a random temporary directory as `ca.pem`;
 its path is exposed through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
 `CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops. To
-use a stable caller-owned path instead, pass `caFilePath`; its parent
-directories are created automatically and the file is kept on shutdown. Relative
-paths resolve from the application's current working directory, so server
-applications should use an absolute path.
+choose its location, pass `caFilePath`; its parent directories are created
+automatically and the managed file is still removed on shutdown. Relative paths
+resolve from the application's current working directory, so server applications
+should use an absolute path.
 
 ```ts
 import { RemoteAgentProxy } from '@stashbase/agent-proxy'
@@ -167,7 +167,7 @@ const proxy = new RemoteAgentProxy({
   apiKey: process.env.STASHBASE_API_KEY!,
   project: 'platform',
   environment: 'development',
-  // Optional: write the CA to this stable path instead of a temporary ca.pem.
+  // Optional: write the managed CA file here instead of a temporary ca.pem.
   // caFilePath: '/var/run/my-app/stashbase-proxy-ca.pem',
   egressHosts: ['api.openai.com'],
   bindings: {

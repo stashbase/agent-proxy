@@ -103,22 +103,29 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
   const sockets = new Set<Socket>()
   const upstreamRequests = new Set<ReturnType<typeof requestToRemote>>()
   let directory: string | undefined
+  let caPath: string | undefined
   let server: ReturnType<typeof createHttpServer> | undefined
 
   try {
     const proxyCa = session.proxy_ca!
-    const caPath = options.caFilePath
+    const currentCaPath = options.caFilePath
       ? resolve(options.caFilePath)
       : join((directory = await mkdtemp(join(tmpdir(), 'stashbase-remote-agent-proxy-'))), 'ca.pem')
-    if (options.caFilePath) await mkdir(dirname(caPath), { recursive: true })
-    await writeFile(caPath, proxyCa.pem, { mode: 0o600 })
-    await chmod(caPath, 0o600)
+    caPath = currentCaPath
+    if (options.caFilePath) await mkdir(dirname(currentCaPath), { recursive: true })
+    await writeFile(currentCaPath, proxyCa.pem, { mode: 0o600 })
+    await chmod(currentCaPath, 0o600)
 
     const remoteUrl = new URL(session.proxy_url, apiUrl)
     const transportIdentity = `${remoteUrl.href}\n${proxyCa.sha256.toLowerCase()}`
     let stopped = false
     server = createHttpServer((request, response) => {
-      const upstream = requestToRemote(remoteUrl, caPath, () => session.session_token, request)
+      const upstream = requestToRemote(
+        remoteUrl,
+        currentCaPath,
+        () => session.session_token,
+        request
+      )
       upstreamRequests.add(upstream)
       upstream.once('close', () => upstreamRequests.delete(upstream))
       upstream.once('error', (error) => {
@@ -146,7 +153,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
         socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
         return
       }
-      void openRemoteConnection(remoteUrl, caPath)
+      void openRemoteConnection(remoteUrl, currentCaPath)
         .then((upstream) => {
           let connectTimeout: ReturnType<typeof setTimeout> | undefined
           sockets.add(upstream)
@@ -233,7 +240,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
       HTTPS_PROXY: url,
       http_proxy: url,
       https_proxy: url,
-      NODE_EXTRA_CA_CERTS: caPath,
+      NODE_EXTRA_CA_CERTS: currentCaPath,
       NODE_USE_ENV_PROXY: '1',
       NO_PROXY: '',
       no_proxy: '',
@@ -241,15 +248,15 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
       all_proxy: '',
       npm_config_proxy: '',
       npm_config_https_proxy: '',
-      SSL_CERT_FILE: caPath,
-      CURL_CA_BUNDLE: caPath,
-      GIT_SSL_CAINFO: caPath,
+      SSL_CERT_FILE: currentCaPath,
+      CURL_CA_BUNDLE: currentCaPath,
+      GIT_SSL_CAINFO: currentCaPath,
     }
     for (const [name, binding] of Object.entries(bindings))
       childEnv[binding.env ?? name] = placeholders[name]
     return {
       url,
-      caPath,
+      caPath: currentCaPath,
       placeholders,
       childEnv,
       async stop() {
@@ -264,6 +271,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
           server!.closeAllConnections()
           await new Promise<void>((resolve) => server!.close(() => resolve()))
           if (directory) await rm(directory, { recursive: true, force: true })
+          else if (caPath) await rm(caPath, { force: true })
         } catch (error) {
           cleanupError = error
         }
@@ -295,6 +303,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
     server?.closeAllConnections()
     if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
+    else if (caPath) await rm(caPath, { force: true }).catch(() => {})
     await revokeSession(apiUrl, options.apiKey, session.session_token, true)
     throw error
   }
@@ -602,8 +611,8 @@ function openRemoteConnection(remoteUrl: URL, caPath: string): Promise<Socket | 
  * Construct this trusted parent-process object with an API key, project, and
  * environment, then call {@link start}. Agent code receives only placeholders,
  * a localhost relay URL, and the public remote-proxy CA. The CA is stored at a
- * temporary `ca.pem` path for child processes and removed on shutdown, unless
- * {@link RemoteAgentProxyOptions.caFilePath} is provided.
+ * temporary `ca.pem` path for child processes and removed on shutdown. Provide
+ * {@link RemoteAgentProxyOptions.caFilePath} to choose that managed file path.
  */
 export class RemoteAgentProxy<
   const Bindings extends Record<string, RemoteAgentProxyBinding> = Record<
