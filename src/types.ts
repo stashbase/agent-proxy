@@ -117,6 +117,12 @@ export type RemoteAgentProxyOptions = {
   hooks?: RemoteAgentProxyHooks
   /** Defaults to https://api.stashbase.dev. */
   apiUrl?: string
+  /**
+   * Optional destination for the remote proxy CA. Parent directories are created
+   * automatically and the file is preserved when the proxy stops. When omitted,
+   * a temporary `ca.pem` file is created and removed on shutdown.
+   */
+  caFilePath?: string
 }
 
 /** A structured failure returned while starting a Remote Agent Proxy session. */

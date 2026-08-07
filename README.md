@@ -154,7 +154,9 @@ placeholders and a localhost proxy URL. The session token and resolved secret
 values stay in the parent process and are revoked when `stop()` completes.
 The remote public CA is written to a random temporary directory as `ca.pem`;
 its path is exposed through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
-`CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops.
+`CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops. To
+use a stable caller-owned path instead, pass `caFilePath`; its parent
+directories are created automatically and the file is kept on shutdown.
 
 ```ts
 import { RemoteAgentProxy } from '@stashbase/agent-proxy'
@@ -163,6 +165,8 @@ const proxy = new RemoteAgentProxy({
   apiKey: process.env.STASHBASE_API_KEY!,
   project: 'platform',
   environment: 'development',
+  // Optional: write the CA to this stable path instead of a temporary ca.pem.
+  // caFilePath: '/var/run/my-app/stashbase-proxy-ca.pem',
   egressHosts: ['api.openai.com'],
   bindings: {
     OPENAI_API_KEY: { from: 'OPENAI_API_KEY', env: 'OPENAI_API_KEY', hosts: ['api.openai.com'] },

@@ -5,9 +5,9 @@ import {
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { connect, type Socket } from 'node:net'
 import { connect as connectTls, type ConnectionOptions, type TLSSocket } from 'node:tls'
 import { createHash } from 'node:crypto'
@@ -107,9 +107,12 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
 
   try {
     const proxyCa = session.proxy_ca!
-    directory = await mkdtemp(join(tmpdir(), 'stashbase-remote-agent-proxy-'))
-    const caPath = join(directory, 'ca.pem')
+    const caPath = options.caFilePath
+      ? resolve(options.caFilePath)
+      : join((directory = await mkdtemp(join(tmpdir(), 'stashbase-remote-agent-proxy-'))), 'ca.pem')
+    if (options.caFilePath) await mkdir(dirname(caPath), { recursive: true })
     await writeFile(caPath, proxyCa.pem, { mode: 0o600 })
+    await chmod(caPath, 0o600)
 
     const remoteUrl = new URL(session.proxy_url, apiUrl)
     const transportIdentity = `${remoteUrl.href}\n${proxyCa.sha256.toLowerCase()}`
@@ -260,7 +263,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
           for (const socket of sockets) socket.destroy()
           server!.closeAllConnections()
           await new Promise<void>((resolve) => server!.close(() => resolve()))
-          await rm(directory!, { recursive: true, force: true })
+          if (directory) await rm(directory, { recursive: true, force: true })
         } catch (error) {
           cleanupError = error
         }
@@ -599,7 +602,8 @@ function openRemoteConnection(remoteUrl: URL, caPath: string): Promise<Socket | 
  * Construct this trusted parent-process object with an API key, project, and
  * environment, then call {@link start}. Agent code receives only placeholders,
  * a localhost relay URL, and the public remote-proxy CA. The CA is stored at a
- * temporary `ca.pem` path for child processes and removed on shutdown.
+ * temporary `ca.pem` path for child processes and removed on shutdown, unless
+ * {@link RemoteAgentProxyOptions.caFilePath} is provided.
  */
 export class RemoteAgentProxy<
   const Bindings extends Record<string, RemoteAgentProxyBinding> = Record<
