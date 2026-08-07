@@ -115,8 +115,6 @@ export type RemoteAgentProxyOptions = {
   denyHosts?: string[]
   bindings: Record<string, RemoteAgentProxyBinding>
   hooks?: RemoteAgentProxyHooks
-  /** Defaults to https://api.stashbase.dev. */
-  apiUrl?: string
   /**
    * Optional destination for the remote proxy CA. Parent directories are created
    * automatically and the file is removed when the proxy stops. When omitted,

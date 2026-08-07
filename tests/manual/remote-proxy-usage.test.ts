@@ -30,7 +30,6 @@ it.skipIf(!runLiveTest)(
       apiKey: process.env.STASHBASE_API_KEY!,
       project: process.env.STASHBASE_PROJECT!,
       environment: process.env.STASHBASE_ENVIRONMENT!,
-      apiUrl: process.env.STASHBASE_API_URL ?? 'http://127.0.0.1:5000',
       egressHosts: [],
       bindings: {
         OPENAI_API_KEY: {
