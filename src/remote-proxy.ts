@@ -52,6 +52,7 @@ type ActiveRemoteProxy<Names extends string> = AgentProxyTransport<Names> & {
 }
 
 const CONTROL_PLANE_TIMEOUT_MS = 10_000
+const RELAY_TIMEOUT_MS = 15_000
 
 class RemoteProxyStartupError extends Error {
   constructor(
@@ -138,9 +139,11 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
       }
       void openRemoteConnection(remoteUrl, caPath)
         .then((upstream) => {
+          let connectTimeout: ReturnType<typeof setTimeout> | undefined
           sockets.add(upstream)
           upstream.once('close', () => sockets.delete(upstream))
           upstream.once('error', (error) => {
+            if (connectTimeout) clearTimeout(connectTimeout)
             emitRelayError(options.hooks, {
               kind: 'connect',
               host: hostFromAuthority(target),
@@ -151,12 +154,17 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
           upstream.write(
             `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: Bearer ${session.session_token}\r\n\r\n`
           )
+          connectTimeout = setTimeout(() => {
+            socket.end('HTTP/1.1 504 Gateway Timeout\r\n\r\n')
+            upstream.destroy(relayTimeoutError('Remote Agent Proxy CONNECT timed out'))
+          }, RELAY_TIMEOUT_MS)
           let response = Buffer.alloc(0)
           const receiveConnect = (chunk: Buffer) => {
             response = Buffer.concat([response, chunk])
             const end = response.indexOf('\r\n\r\n')
             if (end < 0) return
             upstream.off('data', receiveConnect)
+            if (connectTimeout) clearTimeout(connectTimeout)
             const header = response.subarray(0, end + 4)
             const remaining = response.subarray(end + 4)
             if (!/^HTTP\/1\.[01] 200\b/.test(header.toString('latin1'))) {
@@ -240,12 +248,13 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
         stopped = true
         rotation.abort()
         await rotationTask
+        let cleanupError: unknown
         try {
           for (const socket of sockets) socket.destroy()
           await new Promise<void>((resolve) => server!.close(() => resolve()))
           await rm(directory!, { recursive: true, force: true })
         } catch (error) {
-          return remoteStopError(error)
+          cleanupError = error
         }
         try {
           const response = await fetch(`${apiUrl}/v1/agent-proxy/sessions/current`, {
@@ -256,7 +265,11 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
             },
             signal: AbortSignal.timeout(5_000),
           })
-          if (response.ok) return { ok: true, data: null, error: null, status: response.status }
+          if (response.ok) {
+            return cleanupError
+              ? remoteStopError(cleanupError)
+              : { ok: true, data: null, error: null, status: response.status }
+          }
           return remoteStopError(await responseError(response))
         } catch (error) {
           return remoteStopError(error)
@@ -463,6 +476,10 @@ function relayError(error: unknown): { code: string; message: string } {
   }
 }
 
+function relayTimeoutError(message: string): Error & { code: 'ETIMEDOUT' } {
+  return Object.assign(new Error(message), { code: 'ETIMEDOUT' as const })
+}
+
 function hostFromAuthority(authority: string): string | undefined {
   try {
     return new URL(`http://${authority}`).hostname || undefined
@@ -516,7 +533,11 @@ function requestToRemote(
     headers: { ...request.headers, 'proxy-authorization': `Bearer ${token()}` },
     ...(remoteUrl.protocol === 'https:' ? { ca: readFileSync(caPath) } : {}),
   }
-  return (remoteUrl.protocol === 'https:' ? httpsRequest : httpRequest)(requestOptions)
+  const upstream = (remoteUrl.protocol === 'https:' ? httpsRequest : httpRequest)(requestOptions)
+  upstream.setTimeout(RELAY_TIMEOUT_MS, () => {
+    upstream.destroy(relayTimeoutError('Remote Agent Proxy did not respond in time'))
+  })
+  return upstream
 }
 
 function openRemoteConnection(remoteUrl: URL, caPath: string): Promise<Socket | TLSSocket> {
@@ -530,9 +551,17 @@ function openRemoteConnection(remoteUrl: URL, caPath: string): Promise<Socket | 
             ca: readFileSync(caPath),
           } as ConnectionOptions)
         : connect(port, remoteUrl.hostname)
-    socket.once('error', reject)
+    const timeout = setTimeout(() => {
+      socket.destroy(relayTimeoutError('Remote Agent Proxy connection timed out'))
+    }, RELAY_TIMEOUT_MS)
+    const onError = (error: Error) => {
+      clearTimeout(timeout)
+      reject(error)
+    }
+    socket.once('error', onError)
     socket.once(remoteUrl.protocol === 'https:' ? 'secureConnect' : 'connect', () => {
-      socket.off('error', reject)
+      clearTimeout(timeout)
+      socket.off('error', onError)
       resolve(socket)
     })
   })
