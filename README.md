@@ -187,6 +187,11 @@ try {
 }
 ```
 
+`RemoteAgentProxy` also works with the existing sandboxed tool runner. With
+`sandbox: true`, the worker is restricted to the localhost relay; the relay
+uses the remote session while the worker receives only placeholders and proxy
+trust settings.
+
 Use remote hooks for metadata-only operational visibility. They never receive
 credentials, session tokens, request paths, or bodies:
 
