@@ -56,10 +56,9 @@ type ActiveRemoteProxy<Names extends string> = AgentProxyTransport<Names> & {
 const CONTROL_PLANE_TIMEOUT_MS = 10_000
 const RELAY_TIMEOUT_MS = 15_000
 const USER_AGENT = `stashbase/agent-proxy/${__AGENT_PROXY_VERSION__}`
-const STASHBASE_API_URL =
-  process.env.NODE_ENV === 'test'
-    ? (process.env.STASHBASE_API_URL ?? 'http://127.0.0.1:5000').replace(/\/$/, '')
-    : 'https://api.stashbase.dev'
+const STASHBASE_API_URL = process.env.VITEST
+  ? (process.env.STASHBASE_API_URL ?? 'http://127.0.0.1:5000').replace(/\/$/, '')
+  : 'https://api.stashbase.dev'
 
 class RemoteProxyStartupError extends Error {
   constructor(
