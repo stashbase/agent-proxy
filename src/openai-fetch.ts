@@ -7,12 +7,12 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { connect as tlsConnect } from 'node:tls'
 import type {
   CreateOpenAIProxyClientOptions,
-  LocalAgentProxy,
+  AgentProxyTransport,
   OpenAIClientConstructor,
 } from './types'
 
 /** Explicit HTTPS-proxy fetch for clients that do not honor environment proxy variables. */
-export function createOpenAIProxyFetch(proxy: LocalAgentProxy): typeof fetch {
+export function createOpenAIProxyFetch(proxy: AgentProxyTransport): typeof fetch {
   const ca = readFileSync(proxy.caPath)
   const proxyUrl = new URL(proxy.url)
 

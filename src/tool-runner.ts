@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import type {
-  LocalAgentProxy,
+  AgentProxyTransport,
   SandboxedToolExecutor,
   SandboxedToolExportName,
   SandboxedToolModule,
@@ -173,7 +173,7 @@ function normalizeModule(module: URL | string): string {
   return new URL(`file://${module}`).href
 }
 
-function childEnvironment(proxy: LocalAgentProxy, extra: Record<string, string> | undefined) {
+function childEnvironment(proxy: AgentProxyTransport, extra: Record<string, string> | undefined) {
   const safeRuntimeEnvironment = Object.fromEntries(
     inheritedEnvironmentAllowList.flatMap((name) => {
       const value = process.env[name]
@@ -224,7 +224,7 @@ function assertLinuxSandboxAvailable(runtime: string): void {
 }
 
 export function sandboxCommand(
-  proxy: LocalAgentProxy,
+  proxy: AgentProxyTransport,
   sandbox: boolean,
   platform = process.platform,
   runtime = process.execPath

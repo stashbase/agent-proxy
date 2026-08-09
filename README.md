@@ -1,5 +1,7 @@
 # @stashbase/agent-proxy
 
+## Local Agent Proxy
+
 Node.js 20+ local Agent Proxy. It exposes placeholders to an agent harness and injects credentials only where a configured policy permits it, over a temporary locally trusted TLS interception connection. The trusted application resolves each secret (for example, with the main Stashbase SDK) before creating its binding.
 
 **A focused harness-level security primitive for agent tools:** let an agent use
@@ -12,11 +14,11 @@ It is designed to fit an existing Node application and secret store. You do not
 need a separate agent runtime, remote sandbox service, or a replacement for your
 current framework.
 
-Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. The `egressHosts`, `denyHosts`, and `bindings` policy matches CLI agent profile semantics. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
+Use `new AgentProxy(policy)` followed by `await proxy.start()` for explicit lifecycle management, or `startLocalAgentProxy(policy)` as a convenience. `createOpenAIProxyClient(OpenAIOrConfiguredClient, { proxy })` and `createAnthropicProxyClient(configuredAnthropicClient, { proxy })` route official SDK clients through the proxy. `proxy.childEnv` includes configured binding environment placeholders plus `HTTPS_PROXY`/`HTTP_PROXY`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY=1`, and empty `NO_PROXY`/`no_proxy`.
 
 This reduces accidental secret disclosure; it is not a malicious-process sandbox. OpenAI and Anthropic clients have dedicated SDK adapters; bindings can also be used by isolated tool workers that make proxy-aware HTTPS requests.
 
-## Use with the Stashbase Node SDK
+### Use with the Stashbase Node SDK
 
 `@stashbase/agent-proxy` is standalone: it does not require the Stashbase Node
 SDK at runtime. They work well together, however, because the trusted
@@ -68,7 +70,7 @@ The dependency direction is intentional: the application owns Stashbase SDK
 authentication and secret resolution; Agent Proxy owns the short-lived local
 credential boundary. This package never imports or requires the Node SDK.
 
-## Use with the Anthropic SDK
+### Use with the Anthropic SDK
 
 Pass an existing, application-configured Anthropic client to the proxy. This
 preserves the client's API key, base URL, retries, and all other SDK options;
@@ -107,7 +109,7 @@ Use a credential binding instead when Anthropic credentials must be available
 to an agent tool. The trusted application still chooses the binding name,
 header, and permitted hosts.
 
-## Use with Vercel AI SDK
+### Use with Vercel AI SDK
 
 Pass the proxy fetch implementation while creating an AI SDK provider. This
 works in ordinary Node applications and on any host; Vercel deployment is not
@@ -143,6 +145,67 @@ try {
 
 The same `fetch` value can be passed to other AI SDK provider factories that
 support a custom `fetch`, including the Anthropic provider.
+
+## Remote Agent Proxy
+
+`RemoteAgentProxy` creates a short-lived, control-plane-backed session. The
+trusted application supplies its Stashbase API key; the agent receives only
+placeholders and a localhost proxy URL. The session token and resolved secret
+values stay in the parent process and are revoked when `stop()` completes.
+The remote public CA is written to a random temporary directory as `ca.pem`;
+its path is exposed through `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
+`CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO`, then removed when the proxy stops. To
+choose its location, pass `caFilePath`; its parent directories are created
+automatically and the managed file is still removed on shutdown. Relative paths
+resolve from the application's current working directory, so server applications
+should use an absolute path.
+
+```ts
+import { RemoteAgentProxy } from '@stashbase/agent-proxy'
+
+const proxy = new RemoteAgentProxy({
+  apiKey: process.env.STASHBASE_API_KEY!,
+  project: 'platform',
+  environment: 'development',
+  // Optional: write the managed CA file here instead of a temporary ca.pem.
+  // caFilePath: '/var/run/my-app/stashbase-proxy-ca.pem',
+  egressHosts: ['api.openai.com'],
+  bindings: {
+    OPENAI_API_KEY: { from: 'OPENAI_API_KEY', env: 'OPENAI_API_KEY', hosts: ['api.openai.com'] },
+  },
+})
+
+const started = await proxy.start()
+if (!started.ok) throw new Error(started.error.message)
+
+try {
+  // Give proxy.childEnv to the agent or tool process. It contains only
+  // OPENAI_API_KEY=${STASHBASE_OPENAI_API_KEY}, never the real secret.
+} finally {
+  const stopped = await proxy.stop()
+  if (!stopped.ok) console.error(stopped.error)
+}
+```
+
+`RemoteAgentProxy` also works with the existing sandboxed tool runner. With
+`sandbox: true`, the worker is restricted to the localhost relay; the relay
+uses the remote session while the worker receives only placeholders and proxy
+trust settings.
+
+Use remote hooks for metadata-only operational visibility. They never receive
+credentials, session tokens, request paths, or bodies:
+
+```ts
+const proxy = new RemoteAgentProxy({
+  // …session configuration
+  hooks: {
+    onSessionRefresh: (event) => {
+      if (event.state === 'failed') console.warn(event.error, event.retryInMs)
+    },
+    onRelayError: (event) => console.warn(event.kind, event.host, event.error),
+  },
+})
+```
 
 ## Why use it
 
@@ -291,7 +354,7 @@ const createGitHubIssue = tool({
 
 `tools/github.mjs` receives `GITHUB_TOKEN=${STASHBASE_GITHUB_TOKEN}`, never the real token. It can use Node 20+ `fetch` (or a client that honors proxy configuration) to call `api.github.com`; the proxy replaces that exact placeholder only for the configured header and host.
 
-Each invocation starts a fresh Node worker with a minimal runtime environment, configured placeholders, and proxy/CA settings. `sandbox: true` additionally restricts network access to the local proxy, using the same approach as the CLI: `sandbox-exec` on macOS or a systemd user scope on Linux. It is opt-in and unavailable on Windows. Without it, a tool that bypasses proxy configuration can still make direct connections.
+Each invocation starts a fresh Node worker with a minimal runtime environment, configured placeholders, and proxy/CA settings. `sandbox: true` additionally restricts network access to the local proxy using `sandbox-exec` on macOS or a systemd user scope on Linux. It is opt-in and unavailable on Windows. Without it, a tool that bypasses proxy configuration can still make direct connections.
 
 For a module with several tools, configure its proxy and sandbox policy once, then expose only the exports that your application intends to register:
 

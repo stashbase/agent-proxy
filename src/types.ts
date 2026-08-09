@@ -66,9 +66,86 @@ export type StartLocalAgentProxyOptions = {
   hooks?: AgentProxyHooks
 }
 
+/** A secret reference resolved by the Stashbase remote Agent Proxy, never locally. */
+export type RemoteAgentProxyBinding = Omit<AgentProxyBinding, 'secret'> & {
+  /** Remote Stashbase secret name. Defaults to the binding name. */
+  from?: string
+  /** Placeholder exposed to the agent. Defaults to `${STASHBASE_<binding name>}`. */
+  placeholder?: string
+}
+
+/** Metadata-only session refresh event. It never includes session tokens or secrets. */
+export type RemoteAgentProxySessionRefreshEvent =
+  | { state: 'succeeded'; expiresAt: string }
+  | {
+      state: 'failed'
+      expiresAt: string
+      retryInMs: number
+      error: { code: string; message: string; status: number | null }
+    }
+
+/** Metadata-only failure while the localhost relay connects to the remote proxy. */
+export type RemoteAgentProxyRelayErrorEvent = {
+  kind: 'request' | 'connect'
+  host?: string
+  error: { code: string; message: string }
+}
+
+/** Read-only observability hooks for a Remote Agent Proxy session. */
+export type RemoteAgentProxyHooks = {
+  onSessionRefresh?: (event: RemoteAgentProxySessionRefreshEvent) => void | Promise<void>
+  onRelayError?: (event: RemoteAgentProxyRelayErrorEvent) => void | Promise<void>
+}
+
+/**
+ * Configuration for a short-lived Stashbase-managed Agent Proxy session.
+ *
+ * Unlike {@link StartLocalAgentProxyOptions}, the Stashbase control plane
+ * resolves secrets and hosts the remote proxy. The API remains authoritative
+ * for access checks on both session creation and replacement.
+ */
+export type RemoteAgentProxyOptions = {
+  /** Stashbase API key used only by the trusted application to create/revoke the session. */
+  apiKey: string
+  /** Project ID or name. */
+  project: string
+  /** Environment ID or name within the project. */
+  environment: string
+  egressHosts: string[]
+  denyHosts?: string[]
+  bindings: Record<string, RemoteAgentProxyBinding>
+  hooks?: RemoteAgentProxyHooks
+  /**
+   * Optional destination for the remote proxy CA. Parent directories are created
+   * automatically and the file is removed when the proxy stops. When omitted,
+   * a temporary `ca.pem` file is created instead.
+   * Relative paths resolve from `process.cwd()`; prefer an absolute path for
+   * server applications.
+   */
+  caFilePath?: string
+}
+
+/** A structured failure returned while starting a Remote Agent Proxy session. */
+export type RemoteAgentProxyStartError = {
+  code: string
+  message: string
+  details?: unknown
+}
+
+/** Node SDK-style outcome returned by {@link RemoteAgentProxy.start}. */
+export type RemoteAgentProxyStartResult<Proxy> =
+  | { ok: true; data: Proxy; error: null; status: number | null }
+  | { ok: false; data: null; error: RemoteAgentProxyStartError; status: number | null }
+
+/** Node SDK-style outcome returned by {@link RemoteAgentProxy.stop}. */
+export type RemoteAgentProxyStopResult =
+  | { ok: true; data: null; error: null; status: number | null }
+  | { ok: false; data: null; error: RemoteAgentProxyStartError; status: number | null }
+
 export type SecretPlaceholder<Name extends string> = `\${STASHBASE_${Name}}`
 
-export type LocalAgentProxy<Names extends string = never> = {
+/** Shared connection details used by proxy-aware SDK adapters and tool workers. */
+export type AgentProxyTransport<Names extends string = never> = {
   url: string
 
   caPath: string
@@ -77,14 +154,17 @@ export type LocalAgentProxy<Names extends string = never> = {
   placeholders: Record<string, string> & { [Name in Names]: SecretPlaceholder<Name> }
 
   childEnv: Record<string, string>
+}
 
+/** A local proxy with lifecycle ownership of disposable local CA material. */
+export type LocalAgentProxy<Names extends string = never> = AgentProxyTransport<Names> & {
   stop(): Promise<void>
 }
 
 export type OpenAIClientConstructor = new (options: ClientOptions) => import('openai').default
 
 export type CreateOpenAIProxyClientOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 
   /** Defaults to OPENAI_API_KEY. Select another configured binding explicitly when needed. */
   apiKeyBinding?: string
@@ -97,12 +177,12 @@ export type FetchConfigurableClient<Client> = {
 
 /** Options for wrapping an existing official Anthropic client. */
 export type CreateAnthropicProxyClientOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 }
 
 /** Configuration for an isolated Node worker that implements an agent tool. */
 export type SandboxedToolOptions = {
-  proxy: LocalAgentProxy
+  proxy: AgentProxyTransport
 
   /** File URL or absolute path of an ESM/CommonJS module exporting the tool function. */
   module: URL | string
