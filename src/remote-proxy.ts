@@ -275,8 +275,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
         try {
           for (const upstream of upstreamRequests) upstream.destroy()
           for (const socket of sockets) socket.destroy()
-          server!.closeAllConnections()
-          await new Promise<void>((resolve) => server!.close(() => resolve()))
+          await closeLocalServer(server!)
           if (directory) await rm(directory, { recursive: true, force: true })
           else if (caPath) await rm(caPath, { force: true })
         } catch (error) {
@@ -306,8 +305,7 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
   } catch (error) {
     for (const upstream of upstreamRequests) upstream.destroy()
     for (const socket of sockets) socket.destroy()
-    server?.closeAllConnections()
-    if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()))
+    if (server) await closeLocalServer(server)
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {})
     else if (caPath) await rm(caPath, { force: true }).catch(() => {})
     await revokeSession(apiUrl, options.apiKey, session.session_token)
@@ -540,6 +538,15 @@ function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
       { once: true }
     )
   })
+}
+
+async function closeLocalServer(server: ReturnType<typeof createHttpServer>): Promise<void> {
+  if (!server.listening) return
+  const closed = new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()))
+  })
+  server.closeAllConnections()
+  await closed
 }
 
 async function revokeSession(apiUrl: string, apiKey: string, token: string): Promise<void> {
