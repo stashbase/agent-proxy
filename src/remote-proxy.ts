@@ -161,6 +161,10 @@ async function createRemoteProxy<Bindings extends Record<string, RemoteAgentProx
           let connectTimeout: ReturnType<typeof setTimeout> | undefined
           sockets.add(upstream)
           upstream.once('close', () => sockets.delete(upstream))
+          socket.once('close', () => {
+            if (connectTimeout) clearTimeout(connectTimeout)
+            upstream.destroy()
+          })
           upstream.once('error', (error) => {
             if (connectTimeout) clearTimeout(connectTimeout)
             emitRelayError(options.hooks, {
