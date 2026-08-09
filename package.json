@@ -1,6 +1,6 @@
 {
   "name": "@stashbase/agent-proxy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scoped credential proxy and sandboxed tool runner for AI agents",
   "keywords": [
     "stashbase",
